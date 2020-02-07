@@ -68,19 +68,26 @@ fn main() {
             &mut attributes,
         );
 
-        // Set window title.
-        let title_str = CString::new("hello-world").unwrap();
-        (xlib.XStoreName)(display, window, title_str.as_ptr() as *mut c_char);
+        // raise the window
+        (xlib.XMapRaised)(display, window);
 
         // Grab the keyboard
-        (xlib.XGrabKeyboard)(
-            display,
-            root,
-            xlib::True,
-            xlib::GrabModeAsync,
-            xlib::GrabModeAsync,
-            xlib::CurrentTime,
-        );
+        for _ in 0..1000 {
+            if (xlib.XGrabKeyboard)(
+                display,
+                root,
+                xlib::True,
+                xlib::GrabModeAsync,
+                xlib::GrabModeAsync,
+                xlib::CurrentTime,
+            ) == 0 {
+                // Successfully grabbed keyboard
+                break;
+            } else {
+                // Try again
+                sleep(Duration::from_nanos(1_000_000));
+            }
+        }
 
         // initialize graphics context
         let mut xgc_values: xlib::XGCValues = mem::MaybeUninit::uninit().assume_init();
