@@ -1,9 +1,9 @@
 use std::collections::HashMap;
-use std::fs::{read_dir, File};
+use std::env::var;
+use std::fs::{self, read_dir, File};
 use std::io::Read;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use std::env::var;
 
 pub type Apps = HashMap<String, (String, Terminal)>;
 
@@ -13,14 +13,13 @@ pub enum Terminal {
     Hide,
 }
 
-pub fn read_applications(apps: Arc<Mutex<Apps>>) {
-    let now = Instant::now();
+fn do_read_applications<'a>(
+    apps: Arc<Mutex<Apps>>,
+    dirs: impl IntoIterator<Item = &'a str>,
+    nondesktop: bool,
+) {
     // iterate over all files in applications directories
-    for dir in &[
-        "/usr/share/applications",
-        "/usr/local/share/applications",
-        &format!("{}/.local/share/applications", var("HOME").unwrap()),
-    ] {
+    for dir in dirs {
         let files_iterator = match read_dir(dir) {
             Ok(iterator) => iterator,
             Err(e) => {
@@ -33,71 +32,109 @@ pub fn read_applications(apps: Arc<Mutex<Apps>>) {
                 Ok(f) => f,
                 Err(_) => continue,
             };
-            // make sure it's a .desktop file
-            let path = file.path();
-            let extension = match path.extension() {
-                Some(e) => e,
-                None => continue,
-            };
-            if extension != "desktop" {
-                continue;
-            }
 
-            // read the file contents
-            let mut file = match File::open(path) {
-                Ok(f) => f,
-                Err(_) => continue,
-            };
-            let mut contents = String::new();
-            if let Err(_) = file.read_to_string(&mut contents) {
-                continue;
-            }
-            let mut name = String::new();
-            let mut exec = String::new();
-            let mut app_type = String::new();
-            let mut terminal = String::new();
-            for line in contents.split('\n') {
-                if exec == "" && line.starts_with("Exec=") {
-                    exec = line[5..].to_string();
-                    // remove any arguments
-                    while let Option::Some(i) = exec.find("%") {
-                        exec.replace_range(i..(i+2), "");
+            let path = file.path();
+            let (name, exec, terminal) = if path
+                .extension()
+                .map(|extension| extension == "desktop")
+                .unwrap_or(false)
+            {
+                let contents = match fs::read_to_string(path) {
+                    Ok(contents) => contents,
+                    Err(_) => continue,
+                };
+
+                let mut name = String::new();
+                let mut exec = String::new();
+                let mut app_type = String::new();
+                let mut terminal = String::new();
+                for line in contents.lines() {
+                    for line in contents.split('\n') {
+                        if exec == "" && line.starts_with("Exec=") {
+                            exec = line[5..].to_string();
+                            // remove any arguments
+                            while let Option::Some(i) = exec.find("%") {
+                                exec.replace_range(i..(i + 2), "");
+                            }
+                            // remove quotes if present
+                            if exec.len() > 1 && exec.starts_with("\"") && exec.ends_with("\"") {
+                                exec = exec[1..exec.len() - 1].to_string();
+                            }
+                            exec = exec.trim().to_owned();
+                        } else if name == "" && line.starts_with("Name=") {
+                            name = line[5..].to_string();
+                            // remove quotes if present
+                            if name.len() > 1 && name.starts_with("\"") && name.ends_with("\"") {
+                                name = name[1..name.len() - 1].to_string();
+                            }
+                        } else if app_type == "" && line.starts_with("Type=") {
+                            app_type = line[5..].to_string();
+                        } else if terminal == "" && line.starts_with("Terminal=") {
+                            terminal = line[9..].to_string();
+                        }
                     }
-                    // remove quotes if present
-                    if exec.len()>1 && exec.starts_with("\"") && exec.ends_with("\"") {
-                        exec = exec[1..exec.len()-1].to_string();
-                    }
-                    exec = exec.trim().to_owned();
-                } else if name == "" && line.starts_with("Name=") {
-                    name = line[5..].to_string();
-                    // remove quotes if present
-                    if name.len()>1 && name.starts_with("\"") && name.ends_with("\"") {
-                        name = name[1..name.len()-1].to_string();
-                    }
-                } else if app_type == "" && line.starts_with("Type=") {
-                    app_type = line[5..].to_string();
-                } else if terminal == "" && line.starts_with("Terminal=") {
-                    terminal = line[9..].to_string();
                 }
-            }
-            if name == "" {
-                continue;
-            }
-            if app_type != "Application" {
-                continue;
-            }
-            if exec == "" {
-                continue;
-            }
-            terminal.make_ascii_lowercase();
-            let terminal = if terminal == "" || terminal == "false" {
-                Terminal::Hide
+
+                if name == "" {
+                    continue;
+                }
+                if app_type != "Application" {
+                    continue;
+                }
+                if exec == "" {
+                    continue;
+                }
+                terminal.make_ascii_lowercase();
+                let terminal = if terminal == "" || terminal == "false" {
+                    Terminal::Hide
+                } else {
+                    Terminal::Show
+                };
+
+                (name, exec, terminal)
             } else {
-                Terminal::Show
+                if !nondesktop {
+                    continue;
+                }
+
+                let name = match path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                {
+                    Some(name) => name,
+                    None => continue,
+                };
+                let exec = path.to_string_lossy().into_owned();
+
+                (name, exec, Terminal::Hide)
             };
+
             apps.lock().unwrap().insert(name, (exec, terminal));
         }
     }
+}
+
+pub fn read_applications(apps: Arc<Mutex<Apps>>, scan_path: bool) {
+    const DIRS: &[&str] = &[
+        "/usr/share/applications",
+        "/usr/local/share/applications",
+        "~/.local/share/applications",
+    ];
+
+    let now = Instant::now();
+
+    if scan_path {
+        do_read_applications(
+            apps,
+            DIRS.iter()
+                .map(|dir| *dir)
+                .chain(var("PATH").unwrap().split(":")),
+            true,
+        );
+    } else {
+        do_read_applications(apps, DIRS.iter().map(|dir| *dir), false);
+    }
+
     println!(
         "Finished reading all applications ({}s)",
         now.elapsed().as_secs_f64()
