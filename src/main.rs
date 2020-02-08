@@ -24,7 +24,7 @@ fn main() {
 
     let mut cursor_pos = 0;
     let mut text = String::new();
-    let mut suggestions = Vec::<String>::new();
+    let mut suggestions = Vec::<(String, usize)>::new();
     let mut selected = 0;
     unsafe {
         // Load Xlib library.
@@ -163,19 +163,20 @@ fn main() {
                             if suggestions.len() == 0 {
                                 run_command(&format!("{}", text));
                             } else {
-                                let app = &apps.lock().unwrap()[&suggestions[selected as usize]];
-                                if app.1 == applications::Terminal::Show {
-                                    run_command(&format!("{} -e \"{}\"", args.terminal, app.0));
+                                let app = &apps.lock().unwrap()[suggestions[selected as usize].1];
+                                if app.show_terminal {
+                                    run_command(&format!("{} -e \"{}\"", args.terminal, app.exec));
                                 } else {
-                                    run_command(&format!("{}", app.0));
+                                    run_command(&format!("{}", app.exec));
                                 }
                             }
                             break;
                         } else if event.key.keycode == 23 {
                             // tab
                             if suggestions.len() != 0 {
-                                text = suggestions[selected as usize].clone();
+                                text = suggestions[selected as usize].0.to_string();
                                 cursor_pos = text.len() as i32;
+                                selected = 0;
                             }
                         } else {
                             let mut cs: i8 = 0;
@@ -214,7 +215,7 @@ unsafe fn render_bar(
     font_size: i32,
     text: &str,
     cursor_pos: i32,
-    suggestions: &Vec<String>,
+    suggestions: &Vec<(String, usize)>,
     suggestions_to_fit: u8,
     selected: u8,
     args: &arguments::Args,
@@ -241,7 +242,8 @@ unsafe fn render_bar(
     // render suggestions
     let mut x = (screen_width as f32 * 0.3).floor() as u32;
     for i in 0..suggestions_to_fit {
-        let width = (suggestions[i as usize].len() + 2) as u32 * 9;
+        let name = &suggestions[i as usize].0;
+        let width = (name.len() + 2) as u32 * 9;
         // if selected, render rectangle below
         if selected == i {
             (xlib.XSetForeground)(display, gc, args.color1);
@@ -255,8 +257,8 @@ unsafe fn render_bar(
             gc,
             x as i32 + 9,
             text_y,
-            suggestions[i as usize].as_ptr() as *const i8,
-            suggestions[i as usize].len() as i32,
+            name.as_ptr() as *const i8,
+            name.len() as i32,
         );
         x += width
     }
@@ -266,7 +268,7 @@ fn update_suggestions(
     screen_width: u32,
     font_size: u32,
     text: &str,
-    suggestions: &mut Vec<String>,
+    suggestions: &mut Vec<(String, usize)>,
     apps: &Arc<Mutex<applications::Apps>>,
 ) -> u8 {
     let char_width = font_size / 2;
@@ -274,18 +276,18 @@ fn update_suggestions(
     suggestions.clear();
     // iterate over all application names
     let apps_lock = apps.lock().unwrap();
-    for name in apps_lock.keys() {
-        if name.to_lowercase().contains(&text.to_lowercase()) {
-            suggestions.push(name.to_string());
+    for i in 0..(*apps_lock).len() {
+        if apps_lock[i].name.to_lowercase().contains(&text.to_lowercase()) {
+            suggestions.push((apps_lock[i].name.clone(), i));
         }
     }
-    drop(apps_lock);
+
     // sort the suggestions alphabetically
     suggestions.sort_unstable();
 
     let mut suggestions_to_fit = 0;
     let mut x = (screen_width as f32 * 0.3).floor() as u32;
-    for suggestion in suggestions {
+    for (suggestion, _) in suggestions {
         if x + (suggestion.len() as u32 + 2) * char_width <= screen_width {
             x += char_width * (suggestion.len() as u32 + 2);
             suggestions_to_fit += 1;
@@ -293,6 +295,7 @@ fn update_suggestions(
             break;
         }
     }
+
     suggestions_to_fit
 }
 

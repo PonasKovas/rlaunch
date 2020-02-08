@@ -1,15 +1,15 @@
-use std::collections::HashMap;
 use std::env::var;
 use std::fs::{read_to_string, read_dir};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-pub type Apps = HashMap<String, (String, Terminal)>;
+pub type Apps = Vec<App>;
 
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub enum Terminal {
-    Show,
-    Hide,
+#[derive(Debug, Clone)]
+pub struct App {
+    pub name: String,
+    pub exec: String,
+    pub show_terminal: bool,
 }
 
 fn do_read_applications<'a>(
@@ -82,11 +82,7 @@ fn do_read_applications<'a>(
                     continue;
                 }
                 terminal.make_ascii_lowercase();
-                let terminal = if terminal == "" || terminal == "false" {
-                    Terminal::Hide
-                } else {
-                    Terminal::Show
-                };
+                let terminal = if terminal == "" || terminal == "false" { false } else { true };
 
                 (name, exec, terminal)
             } else {
@@ -103,19 +99,19 @@ fn do_read_applications<'a>(
                 };
                 let exec = path.to_string_lossy().into_owned();
 
-                (name, exec, Terminal::Hide)
+                (name, exec, false)
             };
 
-            apps.lock().unwrap().insert(name, (exec, terminal));
+            apps.lock().unwrap().push(App{name, exec, show_terminal:terminal});
         }
     }
 }
 
 pub fn read_applications(apps: Arc<Mutex<Apps>>, scan_path: bool) {
-    const DIRS: &[&str] = &[
+    let dirs: &[&str] = &[
         "/usr/share/applications",
         "/usr/local/share/applications",
-        "~/.local/share/applications",
+        &format!("{}/.local/share/applications", var("HOME").unwrap()),
     ];
 
     let now = Instant::now();
@@ -123,13 +119,13 @@ pub fn read_applications(apps: Arc<Mutex<Apps>>, scan_path: bool) {
     if scan_path {
         do_read_applications(
             apps,
-            DIRS.iter()
+            dirs.iter()
                 .map(|dir| *dir)
                 .chain(var("PATH").unwrap().split(":")),
             true,
         );
     } else {
-        do_read_applications(apps, DIRS.iter().map(|dir| *dir), false);
+        do_read_applications(apps, dirs.iter().map(|dir| *dir), false);
     }
 
     println!(
