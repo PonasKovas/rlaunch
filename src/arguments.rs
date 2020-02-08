@@ -1,6 +1,6 @@
 use structopt::StructOpt;
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, StructOpt, Clone)]
 #[structopt(name = "rlaunch", about = "A simple and light-weight tool for launching applications and running commands on X11.")]
 pub struct Args {
     /// The color of the bar background
@@ -15,9 +15,17 @@ pub struct Args {
     #[structopt(long, default_value = "#ffffff", parse(try_from_str = parse_color))]
     pub color2: u64,
 
+    /// The color of the suggestions text
+    #[structopt(long, default_value = "#ffffff", parse(try_from_str = parse_color))]
+    pub color3: u64,
+
     /// The height of the bar (in pixels)
     #[structopt(short, long, default_value = "22")]
     pub height: u32,
+
+    /// Show the bar on the bottom of the screen
+    #[structopt(short, long)]
+    pub bottom: bool,
 
     /// The font used on the bar
     /// Use `xfontsel` to determine it

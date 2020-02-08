@@ -21,13 +21,6 @@ fn main() {
     let apps_clone = apps.clone();
     thread::spawn(move || applications::read_applications(apps_clone));
 
-    let color0 = args.color0;
-    let color1 = args.color1;
-    let color_text = args.color2;
-    let height = args.height;
-    let font = args.font;
-    let terminal = args.terminal;
-
     let mut cursor_pos = 0;
     let mut text = String::new();
     let mut suggestions = Vec::<String>::new();
@@ -48,28 +41,30 @@ fn main() {
         let root = (xlib.XRootWindow)(display, screen);
 
         let screen_width: u32 = (xlib.XDisplayWidth)(display, screen).try_into().unwrap();
+        let screen_height: u32 = (xlib.XDisplayHeight)(display, screen).try_into().unwrap();
+
+        let window_y: i32 = if args.bottom {
+            (screen_height - args.height) as i32
+        } else { 0 };
 
         let mut attributes: xlib::XSetWindowAttributes = mem::MaybeUninit::uninit().assume_init();
-        attributes.background_pixel = color0;
+        attributes.background_pixel = args.color0;
         attributes.override_redirect = xlib::True;
 
         let window = (xlib.XCreateWindow)(
             display,
             root,
             0,
-            0,
+            window_y,
             screen_width,
-            height,
+            args.height,
             0,
-            0,
+            xlib::CopyFromParent,
             xlib::InputOutput as c_uint,
             ptr::null_mut(),
             xlib::CWBackPixel | xlib::CWOverrideRedirect,
             &mut attributes,
         );
-
-        // raise the window
-        (xlib.XMapRaised)(display, window);
 
         // Grab the keyboard
         for _ in 0..1000 {
@@ -85,13 +80,13 @@ fn main() {
                 break;
             } else {
                 // Try again
-                sleep(Duration::from_nanos(1_000_000));
+                sleep(Duration::from_nanos(1_000_000)); // 1 millisecond
             }
         }
 
         // initialize graphics context
         let mut xgc_values: xlib::XGCValues = mem::MaybeUninit::uninit().assume_init();
-        xgc_values.font = (xlib.XLoadFont)(display, CString::new(font).unwrap().as_ptr());
+        xgc_values.font = (xlib.XLoadFont)(display, CString::new(args.font.clone()).unwrap().as_ptr());
         let gc = (xlib.XCreateGC)(display, window, xlib::GCFont as u64, &mut xgc_values);
 
         let font_size = {
@@ -99,8 +94,8 @@ fn main() {
             (*font_struct).max_bounds.ascent + (*font_struct).max_bounds.descent
         };
 
-        // Show window.
-        (xlib.XMapWindow)(display, window);
+        // Show window and raise to the top
+        (xlib.XMapRaised)(display, window);
 
         // Main loop.
         let mut event: xlib::XEvent = mem::MaybeUninit::uninit().assume_init();
@@ -114,16 +109,13 @@ fn main() {
                 window,
                 gc,
                 screen_width,
-                height,
                 font_size as i32,
                 &text,
                 cursor_pos,
                 &suggestions,
                 suggestions_to_fit,
                 selected,
-                color0,
-                color1,
-                color_text,
+                &args,
             );
 
             if (xlib.XCheckMaskEvent)(display, xlib::KeyPressMask, &mut event) == 0 {
@@ -163,7 +155,7 @@ fn main() {
                             } else {
                                 let app = &apps.lock().unwrap()[&suggestions[selected as usize]];
                                 if app.1 == applications::Terminal::Show {
-                                    run_command(&format!("{} -e \"{}\"", terminal, app.0));
+                                    run_command(&format!("{} -e \"{}\"", args.terminal, app.0));
                                 } else {
                                     run_command(&format!("{}",app.0));
                                 }
@@ -209,25 +201,22 @@ unsafe fn render_bar(
     window: xlib::Window,
     gc: xlib::GC,
     screen_width: u32,
-    height: u32,
     font_size: i32,
     text: &str,
     cursor_pos: i32,
     suggestions: &Vec<String>,
     suggestions_to_fit: u8,
     selected: u8,
-    color0: u64,
-    color1: u64,
-    color_text: u64,
+    args: &arguments::Args,
 ) {
     // clear
-    (xlib.XSetForeground)(display, gc, color0);
-    (xlib.XFillRectangle)(display, window, gc, 0, 0, screen_width, height);
+    (xlib.XSetForeground)(display, gc, args.color0);
+    (xlib.XFillRectangle)(display, window, gc, 0, 0, screen_width, args.height);
 
-    let text_y = height as i32/2 + font_size/4;
+    let text_y = args.height as i32/2 + font_size/4;
 
     // render the text
-    (xlib.XSetForeground)(display, gc, color_text);
+    (xlib.XSetForeground)(display, gc, args.color2);
     (xlib.XDrawString)(
         display,
         window,
@@ -237,7 +226,7 @@ unsafe fn render_bar(
         text.as_ptr() as *const i8,
         text.len() as i32,
     );
-    (xlib.XFillRectangle)(display, window, gc, cursor_pos * 9, 2, 2, height-4); // caret
+    (xlib.XFillRectangle)(display, window, gc, cursor_pos * 9, 2, 2, args.height-4); // caret
 
     // render suggestions
     let mut x = (screen_width as f32 * 0.3).floor() as u32;
@@ -245,11 +234,11 @@ unsafe fn render_bar(
         let width = (suggestions[i as usize].len()+2) as u32*9;
         // if selected, render rectangle below
         if selected == i {
-            (xlib.XSetForeground)(display, gc, color1);
-            (xlib.XFillRectangle)(display, window, gc, x as i32, 0, width, height);
+            (xlib.XSetForeground)(display, gc, args.color1);
+            (xlib.XFillRectangle)(display, window, gc, x as i32, 0, width, args.height);
         }
         // render text
-        (xlib.XSetForeground)(display, gc, color_text);
+        (xlib.XSetForeground)(display, gc, args.color3);
         (xlib.XDrawString)(
             display,
             window,
