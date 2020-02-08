@@ -1,5 +1,4 @@
 use std::cmp::{max, min};
-use std::convert::TryInto;
 use std::ffi::CString;
 use std::mem;
 use std::os::raw::*;
@@ -41,14 +40,28 @@ fn main() {
         let screen = (xlib.XDefaultScreen)(display);
         let root = (xlib.XRootWindow)(display, screen);
 
-        let screen_width: u32 = (xlib.XDisplayWidth)(display, screen).try_into().unwrap();
-        let screen_height: u32 = (xlib.XDisplayHeight)(display, screen).try_into().unwrap();
+        let (mut window_x, mut window_y) = (0, 0);
+        let mut screen_width = 0;
 
-        let window_y: i32 = if args.bottom {
-            (screen_height - args.height) as i32
-        } else {
-            0
-        };
+        let xin = x11_dl::xinerama::Xlib::open().expect("couldn't load xinerama");
+        let mut screens_number = 0;
+        let screens = (xin.XineramaQueryScreens)(display, &mut screens_number);
+        // get mouse position
+        let (mut mouse_x, mut mouse_y) = (0, 0);
+        (xlib.XQueryPointer)(display, root, &mut 0, &mut 0, &mut mouse_x, &mut mouse_y, &mut 0, &mut 0, &mut 0);
+        for i in 0..screens_number {
+            let screen = *(screens.offset(i as isize));
+            if in_rect((mouse_x, mouse_y), (screen.x_org, screen.y_org), (screen.width, screen.height)) {
+                screen_width = screen.width as u32;
+                window_x = screen.x_org as i32;
+                window_y = if args.bottom {
+                    screen.y_org as i32 + screen.height as i32 - args.height as i32
+                } else {
+                    screen.y_org as i32
+                };
+                break;
+            }
+        }
 
         let mut attributes: xlib::XSetWindowAttributes = mem::MaybeUninit::uninit().assume_init();
         attributes.background_pixel = args.color0;
@@ -57,7 +70,7 @@ fn main() {
         let window = (xlib.XCreateWindow)(
             display,
             root,
-            0,
+            window_x,
             window_y,
             screen_width,
             args.height,
@@ -308,4 +321,13 @@ fn run_command(command: &str) {
         }
         let _ = c.spawn();
     }
+}
+
+fn in_rect(point: (i32, i32), rect: (i16, i16), rect_size: (i16, i16)) -> bool {
+    if point.0 >= rect.0 as i32 && point.0 <= (rect.0+rect_size.0) as i32 {
+        if point.1 >= rect.1 as i32 && point.1 <= (rect.1+rect_size.1) as i32 {
+            return true;
+        }
+    }
+    false
 }
