@@ -3,23 +3,24 @@ use std::convert::TryInto;
 use std::ffi::CString;
 use std::mem;
 use std::os::raw::*;
+use std::process::Command;
 use std::ptr;
 use std::ptr::null_mut;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, sleep};
 use std::time::Duration;
 use x11_dl::xlib;
-use std::process::Command;
 
 mod applications;
 mod arguments;
 
 fn main() {
-    let args =  arguments::get_args();
+    let args = arguments::get_args();
     // spawn a thread for reading all applications
     let apps = Arc::new(Mutex::new(applications::Apps::new()));
     let apps_clone = apps.clone();
-    thread::spawn(move || applications::read_applications(apps_clone));
+    let path = args.path;
+    thread::spawn(move || applications::read_applications(apps_clone, path));
 
     let mut cursor_pos = 0;
     let mut text = String::new();
@@ -45,7 +46,9 @@ fn main() {
 
         let window_y: i32 = if args.bottom {
             (screen_height - args.height) as i32
-        } else { 0 };
+        } else {
+            0
+        };
 
         let mut attributes: xlib::XSetWindowAttributes = mem::MaybeUninit::uninit().assume_init();
         attributes.background_pixel = args.color0;
@@ -75,7 +78,8 @@ fn main() {
                 xlib::GrabModeAsync,
                 xlib::GrabModeAsync,
                 xlib::CurrentTime,
-            ) == 0 {
+            ) == 0
+            {
                 // Successfully grabbed keyboard
                 break;
             } else {
@@ -86,7 +90,8 @@ fn main() {
 
         // initialize graphics context
         let mut xgc_values: xlib::XGCValues = mem::MaybeUninit::uninit().assume_init();
-        xgc_values.font = (xlib.XLoadFont)(display, CString::new(args.font.clone()).unwrap().as_ptr());
+        xgc_values.font =
+            (xlib.XLoadFont)(display, CString::new(args.font.clone()).unwrap().as_ptr());
         let gc = (xlib.XCreateGC)(display, window, xlib::GCFont as u64, &mut xgc_values);
 
         let font_size = {
@@ -101,8 +106,13 @@ fn main() {
         let mut event: xlib::XEvent = mem::MaybeUninit::uninit().assume_init();
 
         loop {
-
-            let suggestions_to_fit = update_suggestions(screen_width, font_size as u32, &text, &mut suggestions, &apps);
+            let suggestions_to_fit = update_suggestions(
+                screen_width,
+                font_size as u32,
+                &text,
+                &mut suggestions,
+                &apps,
+            );
             render_bar(
                 &xlib,
                 display,
@@ -137,7 +147,7 @@ fn main() {
                         } else if event.key.keycode == 114 {
                             // right arrow
                             if cursor_pos == text.len() as i32 {
-                                selected = min(selected+1, suggestions_to_fit-1);
+                                selected = min(selected + 1, suggestions_to_fit - 1);
                             } else {
                                 cursor_pos += 1;
                             }
@@ -157,7 +167,7 @@ fn main() {
                                 if app.1 == applications::Terminal::Show {
                                     run_command(&format!("{} -e \"{}\"", args.terminal, app.0));
                                 } else {
-                                    run_command(&format!("{}",app.0));
+                                    run_command(&format!("{}", app.0));
                                 }
                             }
                             break;
@@ -213,7 +223,7 @@ unsafe fn render_bar(
     (xlib.XSetForeground)(display, gc, args.color0);
     (xlib.XFillRectangle)(display, window, gc, 0, 0, screen_width, args.height);
 
-    let text_y = args.height as i32/2 + font_size/4;
+    let text_y = args.height as i32 / 2 + font_size / 4;
 
     // render the text
     (xlib.XSetForeground)(display, gc, args.color2);
@@ -226,12 +236,12 @@ unsafe fn render_bar(
         text.as_ptr() as *const i8,
         text.len() as i32,
     );
-    (xlib.XFillRectangle)(display, window, gc, cursor_pos * 9, 2, 2, args.height-4); // caret
+    (xlib.XFillRectangle)(display, window, gc, cursor_pos * 9, 2, 2, args.height - 4); // caret
 
     // render suggestions
     let mut x = (screen_width as f32 * 0.3).floor() as u32;
     for i in 0..suggestions_to_fit {
-        let width = (suggestions[i as usize].len()+2) as u32*9;
+        let width = (suggestions[i as usize].len() + 2) as u32 * 9;
         // if selected, render rectangle below
         if selected == i {
             (xlib.XSetForeground)(display, gc, args.color1);
@@ -243,7 +253,7 @@ unsafe fn render_bar(
             display,
             window,
             gc,
-            x as i32+9,
+            x as i32 + 9,
             text_y,
             suggestions[i as usize].as_ptr() as *const i8,
             suggestions[i as usize].len() as i32,
@@ -252,8 +262,14 @@ unsafe fn render_bar(
     }
 }
 
-fn update_suggestions(screen_width: u32, font_size: u32, text: &str, suggestions: &mut Vec<String>, apps: &Arc<Mutex<applications::Apps>>) -> u8 {
-    let char_width = font_size/2;
+fn update_suggestions(
+    screen_width: u32,
+    font_size: u32,
+    text: &str,
+    suggestions: &mut Vec<String>,
+    apps: &Arc<Mutex<applications::Apps>>,
+) -> u8 {
+    let char_width = font_size / 2;
 
     suggestions.clear();
     // iterate over all application names
@@ -270,8 +286,8 @@ fn update_suggestions(screen_width: u32, font_size: u32, text: &str, suggestions
     let mut suggestions_to_fit = 0;
     let mut x = (screen_width as f32 * 0.3).floor() as u32;
     for suggestion in suggestions {
-        if x+(suggestion.len() as u32+2)*char_width <= screen_width {
-            x += char_width*(suggestion.len() as u32+2);
+        if x + (suggestion.len() as u32 + 2) * char_width <= screen_width {
+            x += char_width * (suggestion.len() as u32 + 2);
             suggestions_to_fit += 1;
         } else {
             break;

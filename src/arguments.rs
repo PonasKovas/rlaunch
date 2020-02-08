@@ -1,7 +1,10 @@
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt, Clone)]
-#[structopt(name = "rlaunch", about = "A simple and light-weight tool for launching applications and running commands on X11.")]
+#[structopt(
+    name = "rlaunch",
+    about = "A simple and light-weight tool for launching applications and running commands on X11."
+)]
 pub struct Args {
     /// The color of the bar background
     #[structopt(long, default_value = "#2e2c2c", parse(try_from_str = parse_color))]
@@ -35,6 +38,10 @@ pub struct Args {
     /// The terminal to use when launching applications that require a terminal
     #[structopt(short, long, default_value = "i3-sensible-terminal")]
     pub terminal: String,
+
+    /// Scan the PATH variable.
+    #[structopt(short, long)]
+    pub path: bool,
 }
 
 pub fn get_args() -> Args {
@@ -53,9 +60,9 @@ fn parse_color(string: &str) -> Result<u64, &str> {
         let hex = String::from_utf8_lossy(c);
         let col = match u64::from_str_radix(&hex, 16) {
             Ok(x) => x,
-            Err(_)=> return Err("Couldn't parse color code"),
+            Err(_) => return Err("Couldn't parse color code"),
         };
-        color += col << (2-i)*8;
+        color += col << (2 - i) * 8;
     }
     Ok(color)
 }
