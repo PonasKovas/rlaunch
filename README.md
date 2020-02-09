@@ -12,7 +12,7 @@ This should work on all linux distributions and DEs that use X11, but if it does
 ### Usage
 
 ```
-rlaunch 1.1.0
+rlaunch 1.3.0
 A simple and light-weight tool for launching applications and running commands on X11.
 
 USAGE:
@@ -21,6 +21,7 @@ USAGE:
 FLAGS:
     -b, --bottom     Show the bar on the bottom of the screen
         --help       Prints help information
+    -p, --path       Scan the PATH variable
     -V, --version    Prints version information
 
 OPTIONS:
@@ -28,8 +29,7 @@ OPTIONS:
         --color1 <color1>        The color of the selected suggestion background [default: #1286a1]
         --color2 <color2>        The color of the text [default: #ffffff]
         --color3 <color3>        The color of the suggestions text [default: #ffffff]
-    -f, --font <font>            The font used on the bar Use `xfontsel` to determine it [default: -*-fixed-
-                                 medium-*-*-*-18-*-*-*-*-*-*-*]
+    -f, --font <font>            The font used on the bar [default: DejaVu Sans Mono]
     -h, --height <height>        The height of the bar (in pixels) [default: 22]
     -t, --terminal <terminal>    The terminal to use when launching applications that require a terminal [default: i3-
                                  sensible-terminal]

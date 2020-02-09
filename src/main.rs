@@ -58,27 +58,39 @@ fn main() {
 
     xc.grab_keyboard();
 
-    let font = xc.load_font(&args.font);
-    let font_size = xc.get_font_size(font);
+    let font_height = {
+        let mut h = 12;
+        for x in args.font.split(':') {
+            if x.starts_with("size=") {
+                h = (&x[5..]).parse().expect("couldn't parse font size");
+                break;
+            }
+        }
+        h
+    };
+    let mut trc = xc.init_trc(window, &format!("{}:size=12:antialias=true", args.font));
+    xc.add_color_to_trc(&mut trc, args.color2);
+    xc.add_color_to_trc(&mut trc, args.color3);
 
-    let gc = xc.init_gc(window, font);
+    let gc = xc.init_gc(window);
 
     // show window
     xc.map_window(window);
 
     xc.run(|xc, event| {
-        update_suggestions(&mut suggestions, screen_width, font_size, &text, &apps);
+        update_suggestions(&xc, &trc, &mut suggestions, screen_width, &text, &apps);
         render_bar(
             &xc,
+            &trc,
             window,
             gc,
             screen_width,
-            font_size,
             &text,
             caret_pos,
             &suggestions,
             selected,
             &args,
+            font_height,
         );
         match event {
             None => x11::Action::Run,
@@ -98,29 +110,29 @@ fn main() {
 
 fn render_bar(
     xc: &x11::X11Context,
+    trc: &x11::TextRenderingContext,
     window: u64,
     gc: *mut xlib::_XGC,
     width: u32,
-    font_size: i32,
     text: &str,
     caret_pos: i32,
     suggestions: &[(String, usize)],
     selected: u8,
     args: &arguments::Args,
+    font_height: i32,
 ) {
-    let char_width = font_size / 2;
+    let text_y = args.height as i32 / 2 + font_height / 2;
     // clear
     xc.draw_rect(window, gc, args.color0, 0, 0, width, args.height);
 
     // render the typed text
-    let text_y = args.height as i32 / 2 + font_size / 4;
-    xc.render_text(window, gc, args.color2, 0, text_y, text);
+    xc.render_text(&trc, 0, 0, text_y, text);
     // and the caret
     xc.draw_rect(
         window,
         gc,
         args.color2,
-        caret_pos * char_width,
+        xc.get_text_dimensions(&trc, &text[0..caret_pos as usize]).0 as i32,
         2,
         2,
         args.height - 4,
@@ -130,7 +142,7 @@ fn render_bar(
     let mut x = (width as f32 * 0.3).floor() as i32;
     for (i, suggestion) in suggestions.iter().enumerate() {
         let name = &suggestion.0;
-        let name_width = (name.len() + 2) as i32 * char_width;
+        let name_width = xc.get_text_dimensions(&trc, &name).0 as i32;
         // if selected, render rectangle below
         if selected as usize == i {
             xc.draw_rect(
@@ -139,26 +151,25 @@ fn render_bar(
                 args.color1,
                 x,
                 0,
-                name_width as u32,
+                name_width as u32 + 16,
                 args.height,
             );
         }
 
-        xc.render_text(window, gc, args.color3, x + char_width, text_y, name);
+        xc.render_text(&trc, 1, x + 8, text_y, name);
 
-        x += name_width;
+        x += name_width + 16;
     }
 }
 
 fn update_suggestions(
+    xc: &x11::X11Context,
+    trc: &x11::TextRenderingContext,
     suggestions: &mut Vec<(String, usize)>,
     width: u32,
-    font_size: i32,
     text: &str,
     apps: &Arc<Mutex<applications::Apps>>,
 ) {
-    let char_width = font_size / 2;
-
     suggestions.clear();
     // iterate over application names
     // and find those that contain the typed text
@@ -168,8 +179,9 @@ fn update_suggestions(
     for i in 0..(*apps_lock).len() {
         let name = &apps_lock[i].name;
         if name.to_lowercase().contains(&text.to_lowercase()) {
-            if x + (name.len() as i32 + 2) * char_width <= max_width {
-                x += char_width * (name.len() as i32 + 2);
+            let width = xc.get_text_dimensions(&trc, &name).0 as i32;
+            if x + width <= max_width {
+                x += width;
                 suggestions.push((apps_lock[i].name.clone(), i));
             } else {
                 break;
@@ -211,6 +223,7 @@ fn handle_event(
             if *caret_pos != 0 {
                 text.remove(*caret_pos as usize - 1);
                 *caret_pos -= 1;
+                *selected = 0;
             }
         } else if e.keycode == 36 {
             // enter

@@ -3,7 +3,7 @@ use std::mem::MaybeUninit;
 use std::ptr::{null, null_mut};
 use std::thread::sleep;
 use std::time::Duration;
-use x11_dl::{xinerama, xlib};
+use x11_dl::{xft, xinerama, xlib};
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Action {
@@ -14,8 +14,17 @@ pub enum Action {
 pub struct X11Context {
     xlib: xlib::Xlib,
     xin: xinerama::Xlib,
+    xft: xft::Xft,
     display: *mut xlib::_XDisplay,
     root: u64,
+}
+
+pub struct TextRenderingContext {
+    visual: *mut xlib::Visual,
+    cmap: u64,
+    font: *mut xft::XftFont,
+    colors: Vec<xft::XftColor>,
+    draw: *mut xft::XftDraw,
 }
 
 pub struct Screens {
@@ -47,11 +56,14 @@ impl X11Context {
             // load xinerama
             let xin = xinerama::Xlib::open().map_err(|_| "Failed to load Xinerama.")?;
 
+            // load xft
+            let xft = xft::Xft::open().map_err(|_| "Failed to load XFT")?;
+
             // Open display connection.
             let display = (xlib.XOpenDisplay)(null());
 
             if display.is_null() {
-                panic!("XOpenDisplay failed");
+                return Err("XOpenDisplay failed");
             }
 
             let screen = (xlib.XDefaultScreen)(display);
@@ -60,6 +72,7 @@ impl X11Context {
             Ok(Self {
                 xlib,
                 xin,
+                xft,
                 display,
                 root,
             })
@@ -139,20 +152,47 @@ impl X11Context {
             }
         }
     }
-    pub fn load_font(&self, font: &str) -> u64 {
-        unsafe { (self.xlib.XLoadFont)(self.display, CString::new(font).unwrap().as_ptr()) }
-    }
-    pub fn init_gc(&self, window: u64, font: u64) -> *mut xlib::_XGC {
+    pub fn init_trc(&self, window: u64, font: &str) -> TextRenderingContext {
         unsafe {
-            let mut xgc_values: xlib::XGCValues = MaybeUninit::zeroed().assume_init();
-            xgc_values.font = font;
-            (self.xlib.XCreateGC)(self.display, window, xlib::GCFont as u64, &mut xgc_values)
+            let cfontname = CString::new(font).unwrap();
+
+            let screen = (self.xlib.XDefaultScreen)(self.display);
+            let visual = (self.xlib.XDefaultVisual)(self.display, screen);
+            let cmap = (self.xlib.XDefaultColormap)(self.display, screen);
+
+            let font = (self.xft.XftFontOpenName)(self.display, screen, cfontname.as_ptr());
+            let colors = Vec::new();
+
+            let draw = (self.xft.XftDrawCreate)(self.display, window, visual, cmap);
+            TextRenderingContext {
+                visual,
+                cmap,
+                font,
+                colors,
+                draw,
+            }
         }
     }
-    pub fn get_font_size(&self, font: u64) -> i32 {
+    pub fn add_color_to_trc(&self, trc: &mut TextRenderingContext, color: u64) -> usize {
         unsafe {
-            let font_struct = (self.xlib.XQueryFont)(self.display, font);
-            ((*font_struct).max_bounds.ascent + (*font_struct).max_bounds.descent) as i32
+            let mut xftcolor: xft::XftColor = MaybeUninit::zeroed().assume_init();
+            (self.xft.XftColorAllocName)(
+                self.display,
+                trc.visual,
+                trc.cmap,
+                CString::new(format!("#{:06X}", color)).unwrap().as_ptr(),
+                &mut xftcolor,
+            );
+
+            let index = trc.colors.len();
+            trc.colors.push(xftcolor);
+            index
+        }
+    }
+    pub fn init_gc(&self, window: u64) -> *mut xlib::_XGC {
+        unsafe {
+            let mut xgc_values: xlib::XGCValues = MaybeUninit::zeroed().assume_init();
+            (self.xlib.XCreateGC)(self.display, window, 0, &mut xgc_values)
         }
     }
     pub fn run<F>(&self, mut handle_events: F)
@@ -198,24 +238,42 @@ impl X11Context {
     }
     pub fn render_text(
         &self,
-        window: u64,
-        gc: *mut xlib::_XGC,
-        color: u64,
+        trc: &TextRenderingContext,
+        color: usize,
         x: i32,
         y: i32,
         text: &str,
     ) {
         unsafe {
-            (self.xlib.XSetForeground)(self.display, gc, color);
-            (self.xlib.XDrawString)(
-                self.display,
-                window,
-                gc,
+            let ctext = CString::new(text).unwrap();
+
+            // render the text
+            let mut col = trc.colors[color];
+            (self.xft.XftDrawStringUtf8)(
+                trc.draw,
+                &mut col,
+                trc.font,
                 x,
                 y,
-                text.as_ptr() as *const i8,
+                ctext.as_ptr() as *mut u8,
                 text.len() as i32,
             );
+        }
+    }
+    pub fn get_text_dimensions(&self, trc: &TextRenderingContext, text: &str) -> (u16, u16) {
+        unsafe {
+            let ctext = CString::new(text).unwrap();
+
+            let mut ext = MaybeUninit::zeroed().assume_init();
+            (self.xft.XftTextExtentsUtf8)(
+                self.display,
+                trc.font,
+                ctext.as_ptr() as *mut u8,
+                text.len() as i32,
+                &mut ext,
+            );
+
+            (ext.width, ext.height)
         }
     }
     pub fn keyevent_to_char(&self, mut keyevent: xlib::XKeyEvent) -> char {

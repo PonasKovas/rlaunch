@@ -31,8 +31,7 @@ pub struct Args {
     pub bottom: bool,
 
     /// The font used on the bar
-    /// Use `xfontsel` to determine it
-    #[structopt(short, long, default_value = "-*-fixed-medium-*-*-*-18-*-*-*-*-*-*-*")]
+    #[structopt(short, long, default_value = "DejaVu Sans Mono")]
     pub font: String,
 
     /// The terminal to use when launching applications that require a terminal
