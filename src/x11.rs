@@ -180,11 +180,7 @@ impl X11Context {
             }
         }
     }
-    pub fn shutdown(self) {
-        unsafe {
-            (self.xlib.XCloseDisplay)(self.display);
-        }
-    }
+
     pub fn draw_rect(
         &self,
         window: u64,
@@ -233,6 +229,14 @@ impl X11Context {
         match xevent.get_type() {
             xlib::KeyPress => Some(unsafe { xevent.key }),
             _ => None,
+        }
+    }
+}
+
+impl Drop for X11Context {
+    fn drop(&mut self) {
+        unsafe {
+            (self.xlib.XCloseDisplay)(self.display);
         }
     }
 }

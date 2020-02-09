@@ -31,7 +31,11 @@ fn main() {
     let mouse_pos = xc.get_mouse_pos();
     for screen in xc.get_screens() {
         // multiple monitors support
-        if in_rect((mouse_pos.0, mouse_pos.1), (screen.x_org, screen.y_org), (screen.width, screen.height)) {
+        if in_rect(
+            (mouse_pos.0, mouse_pos.1),
+            (screen.x_org, screen.y_org),
+            (screen.width, screen.height),
+        ) {
             screen_width = screen.width as u32;
             window_pos.0 = screen.x_org as i32;
             window_pos.1 = if args.bottom {
@@ -57,13 +61,7 @@ fn main() {
     xc.map_window(window);
 
     xc.run(|xc, event| {
-        update_suggestions(
-            &mut suggestions,
-            screen_width,
-            font_size,
-            &text,
-            &apps,
-        );
+        update_suggestions(&mut suggestions, screen_width, font_size, &text, &apps);
         render_bar(
             &xc,
             window,
@@ -78,54 +76,81 @@ fn main() {
         );
         match event {
             None => x11::Action::Run,
-            Some(e) => {
-                handle_event(&xc, e, &mut selected, &mut caret_pos, &mut text, &suggestions, &apps, &args.terminal)
-            },
+            Some(e) => handle_event(
+                &xc,
+                e,
+                &mut selected,
+                &mut caret_pos,
+                &mut text,
+                &suggestions,
+                &apps,
+                &args.terminal,
+            ),
         }
     });
-
-    xc.shutdown();
 }
 
 fn render_bar(
-        xc: &x11::X11Context,
-        window: u64,
-        gc: *mut xlib::_XGC,
-        width: u32,
-        font_size: i32,
-        text: &str,
-        caret_pos: i32,
-        suggestions: &Vec<(String, usize)>,
-        selected: u8,
-        args: &arguments::Args
-    ) {
-        let char_width = font_size / 2;
-        // clear
-        xc.draw_rect(window, gc, args.color0, 0, 0, width, args.height);
+    xc: &x11::X11Context,
+    window: u64,
+    gc: *mut xlib::_XGC,
+    width: u32,
+    font_size: i32,
+    text: &str,
+    caret_pos: i32,
+    suggestions: &Vec<(String, usize)>,
+    selected: u8,
+    args: &arguments::Args,
+) {
+    let char_width = font_size / 2;
+    // clear
+    xc.draw_rect(window, gc, args.color0, 0, 0, width, args.height);
 
-        // render the typed text
-        let text_y = args.height as i32 / 2 + font_size / 4;
-        xc.render_text(window, gc, args.color2, 0, text_y, text);
-        // and the caret
-        xc.draw_rect(window, gc, args.color2, caret_pos * char_width, 2, 2, args.height - 4);
+    // render the typed text
+    let text_y = args.height as i32 / 2 + font_size / 4;
+    xc.render_text(window, gc, args.color2, 0, text_y, text);
+    // and the caret
+    xc.draw_rect(
+        window,
+        gc,
+        args.color2,
+        caret_pos * char_width,
+        2,
+        2,
+        args.height - 4,
+    );
 
-        // render suggestions
-        let mut x = (width as f32 * 0.3).floor() as i32;
-        for i in 0..suggestions.len() {
-            let name = &suggestions[i].0;
-            let name_width = (name.len() + 2) as i32 * char_width;
-            // if selected, render rectangle below
-            if selected as usize == i {
-                xc.draw_rect(window, gc, args.color1, x, 0, name_width as u32, args.height);
-            }
-
-            xc.render_text(window, gc, args.color3, x + char_width, text_y, name);
-
-            x += name_width;
+    // render suggestions
+    let mut x = (width as f32 * 0.3).floor() as i32;
+    for i in 0..suggestions.len() {
+        let name = &suggestions[i].0;
+        let name_width = (name.len() + 2) as i32 * char_width;
+        // if selected, render rectangle below
+        if selected as usize == i {
+            xc.draw_rect(
+                window,
+                gc,
+                args.color1,
+                x,
+                0,
+                name_width as u32,
+                args.height,
+            );
         }
+
+        xc.render_text(window, gc, args.color3, x + char_width, text_y, name);
+
+        x += name_width;
+    }
 }
 
-fn update_suggestions(suggestions: &mut Vec<(String, usize)>, width: u32, font_size: i32, text: &str, apps: &Arc<Mutex<applications::Apps>>) {
+fn update_suggestions(
+    suggestions: &mut Vec<(String, usize)>,
+    width: u32,
+    font_size: i32,
+    text: &str,
+    apps: &Arc<Mutex<applications::Apps>>,
+) {
     let char_width = font_size / 2;
 
     suggestions.clear();
@@ -147,29 +172,43 @@ fn update_suggestions(suggestions: &mut Vec<(String, usize)>, width: u32, font_s
     }
 }
 
-fn handle_event(xc: &x11::X11Context, event: &xlib::XEvent, selected: &mut u8, caret_pos: &mut i32, text: &mut String, suggestions: &Vec<(String, usize)>, apps: &Arc<Mutex<applications::Apps>>, terminal: &str) -> x11::Action {
+fn handle_event(
+    xc: &x11::X11Context,
+    event: &xlib::XEvent,
+    selected: &mut u8,
+    caret_pos: &mut i32,
+    text: &mut String,
+    suggestions: &Vec<(String, usize)>,
+    apps: &Arc<Mutex<applications::Apps>>,
+    terminal: &str,
+) -> x11::Action {
     match xc.xevent_to_xkeyevent(*event) {
         Some(e) => {
-            if e.keycode == 9 { // escape
+            if e.keycode == 9 {
+                // escape
                 return x11::Action::Stop;
-            } else if e.keycode == 113 { // left arrow
+            } else if e.keycode == 113 {
+                // left arrow
                 if *selected == 0 {
                     *caret_pos = max(0, *caret_pos - 1);
                 } else {
                     *selected -= 1;
                 }
-            } else if e.keycode == 114 { // right arrow
+            } else if e.keycode == 114 {
+                // right arrow
                 if *caret_pos == text.len() as i32 {
                     *selected = min(*selected + 1, suggestions.len() as u8 - 1);
                 } else {
                     *caret_pos += 1;
                 }
-            } else if e.keycode == 22 { // backspace
+            } else if e.keycode == 22 {
+                // backspace
                 if *caret_pos != 0 {
                     text.remove(*caret_pos as usize - 1);
                     *caret_pos -= 1;
                 }
-            } else if e.keycode == 36 { // enter
+            } else if e.keycode == 36 {
+                // enter
                 // if no suggestions available, just run the text, otherwise launch selected application
                 if suggestions.len() == 0 {
                     run_command(&format!("{}", text));
@@ -182,13 +221,15 @@ fn handle_event(xc: &x11::X11Context, event: &xlib::XEvent, selected: &mut u8, c
                     }
                 }
                 return x11::Action::Stop;
-            } else if e.keycode == 23 { // tab
+            } else if e.keycode == 23 {
+                // tab
                 if suggestions.len() != 0 {
                     *text = suggestions[*selected as usize].0.to_string();
                     *caret_pos = text.len() as i32;
                     *selected = 0;
                 }
-            } else { // some other key
+            } else {
+                // some other key
                 // try to interpret the key as a character
                 let c = xc.keyevent_to_char(e);
                 if !c.is_ascii_control() {
@@ -197,13 +238,11 @@ fn handle_event(xc: &x11::X11Context, event: &xlib::XEvent, selected: &mut u8, c
                     *selected = 0;
                 }
             }
-        },
-        None => {},
+        }
+        None => {}
     }
     match event.get_type() {
-        xlib::KeyPress => {
-
-        }
+        xlib::KeyPress => {}
         _ => (),
     }
     x11::Action::Run
@@ -221,8 +260,8 @@ fn run_command(command: &str) {
 }
 
 fn in_rect(point: (i32, i32), rect: (i16, i16), rect_size: (i16, i16)) -> bool {
-    if point.0 >= rect.0 as i32 && point.0 <= (rect.0+rect_size.0) as i32 {
-        if point.1 >= rect.1 as i32 && point.1 <= (rect.1+rect_size.1) as i32 {
+    if point.0 >= rect.0 as i32 && point.0 <= (rect.0 + rect_size.0) as i32 {
+        if point.1 >= rect.1 as i32 && point.1 <= (rect.1 + rect_size.1) as i32 {
             return true;
         }
     }
