@@ -1,20 +1,23 @@
-use std::cmp::{max, min};
-use std::process::Command;
-use std::sync::{Arc, Mutex};
-use std::thread;
-use x11_dl::xlib;
-
 mod applications;
 mod arguments;
 mod x11;
 
+use applications::{read_applications, Apps};
+use arguments::{get_args, Args};
+use std::cmp::{max, min};
+use std::process::Command;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use x11::{Action, GraphicsContext, TextRenderingContext, X11Context};
+use x11_dl::xlib;
+
 fn main() {
-    let args = arguments::get_args();
+    let args = get_args();
     // spawn a thread for reading all applications
-    let apps = Arc::new(Mutex::new(applications::Apps::new()));
+    let apps = Arc::new(Mutex::new(Apps::new()));
     let apps_clone = apps.clone();
     let path = args.path;
-    thread::spawn(move || applications::read_applications(apps_clone, path));
+    thread::spawn(move || read_applications(&apps_clone, path));
 
     let mut caret_pos = 0;
     let mut text = String::new();
@@ -22,7 +25,7 @@ fn main() {
     let mut selected = 0;
 
     // initialize xlib context
-    let xc = match x11::X11Context::new() {
+    let xc = match X11Context::new() {
         Ok(v) => v,
         Err(e) => {
             println!("Error: {:?}", e);
@@ -92,7 +95,7 @@ fn main() {
             font_height,
         );
         match event {
-            None => x11::Action::Run,
+            None => Action::Run,
             Some(e) => handle_event(
                 &xc,
                 e,
@@ -108,15 +111,15 @@ fn main() {
 }
 
 fn render_bar(
-    xc: &x11::X11Context,
-    trc: &x11::TextRenderingContext,
-    gc: &x11::GraphicsContext,
+    xc: &X11Context,
+    trc: &TextRenderingContext,
+    gc: &GraphicsContext,
     width: u32,
     text: &str,
     caret_pos: i32,
     suggestions: &[(String, usize)],
     selected: u8,
-    args: &arguments::Args,
+    args: &Args,
     font_height: i32,
 ) {
     let text_y = args.height as i32 / 2 + font_height / 2;
@@ -152,12 +155,12 @@ fn render_bar(
 }
 
 fn update_suggestions(
-    xc: &x11::X11Context,
-    trc: &x11::TextRenderingContext,
+    xc: &X11Context,
+    trc: &TextRenderingContext,
     suggestions: &mut Vec<(String, usize)>,
     width: u32,
     text: &str,
-    apps: &Arc<Mutex<applications::Apps>>,
+    apps: &Mutex<applications::Apps>,
 ) {
     suggestions.clear();
     // iterate over application names
@@ -180,82 +183,88 @@ fn update_suggestions(
 }
 
 fn handle_event(
-    xc: &x11::X11Context,
+    xc: &X11Context,
     event: &xlib::XEvent,
     selected: &mut u8,
     caret_pos: &mut i32,
     text: &mut String,
     suggestions: &[(String, usize)],
-    apps: &Arc<Mutex<applications::Apps>>,
+    apps: &Mutex<applications::Apps>,
     terminal: &str,
-) -> x11::Action {
+) -> Action {
     if let Some(e) = xc.xevent_to_xkeyevent(*event) {
-        if e.keycode == 9 {
-            // escape
-            return x11::Action::Stop;
-        } else if e.keycode == 113 {
-            // left arrow
-            if *selected == 0 {
-                *caret_pos = max(0, *caret_pos - 1);
-            } else {
-                *selected -= 1;
+        match e.keycode {
+            9 => {
+                // escape
+                return Action::Stop;
             }
-        } else if e.keycode == 114 {
-            // right arrow
-            if *caret_pos == text.len() as i32 {
-                *selected = min(*selected + 1, suggestions.len() as u8 - 1);
-            } else {
-                *caret_pos += 1;
-            }
-        } else if e.keycode == 22 {
-            // backspace
-            if *caret_pos != 0 {
-                text.remove(*caret_pos as usize - 1);
-                *caret_pos -= 1;
-                *selected = 0;
-            }
-        } else if e.keycode == 36 {
-            // enter
-            // if no suggestions available, just run the text, otherwise launch selected application
-            if suggestions.is_empty() {
-                run_command(text);
-            } else {
-                let app = &apps.lock().unwrap()[suggestions[*selected as usize].1];
-                if app.show_terminal {
-                    run_command(&format!("{} -e \"{}\"", terminal, app.exec));
+            113 => {
+                // left arrow
+                if *selected == 0 {
+                    *caret_pos = max(0, *caret_pos - 1);
                 } else {
-                    run_command(&app.exec);
+                    *selected -= 1;
                 }
             }
-            return x11::Action::Stop;
-        } else if e.keycode == 23 {
-            // tab
-            if !suggestions.is_empty() {
-                *text = suggestions[*selected as usize].0.to_string();
-                *caret_pos = text.len() as i32;
-                *selected = 0;
+            114 => {
+                // right arrow
+                if *caret_pos == text.len() as i32 {
+                    *selected = min(*selected + 1, suggestions.len() as u8 - 1);
+                } else {
+                    *caret_pos += 1;
+                }
             }
-        } else {
-            // some other key
-            // try to interpret the key as a character
-            let c = xc.keyevent_to_char(e);
-            if !c.is_ascii_control() {
-                text.push(c);
-                *caret_pos += 1;
-                *selected = 0;
+            22 => {
+                // backspace
+                if *caret_pos != 0 {
+                    text.remove(*caret_pos as usize - 1);
+                    *caret_pos -= 1;
+                    *selected = 0;
+                }
+            }
+            36 => {
+                // enter
+                // if no suggestions available, just run the text, otherwise launch selected application
+                if suggestions.is_empty() {
+                    run_command(text);
+                } else {
+                    let app = &apps.lock().unwrap()[suggestions[*selected as usize].1];
+                    if app.show_terminal {
+                        run_command(&format!("{} -e \"{}\"", terminal, app.exec));
+                    } else {
+                        run_command(&app.exec);
+                    }
+                }
+                return Action::Stop;
+            }
+            23 => {
+                // tab
+                if !suggestions.is_empty() {
+                    *text = suggestions[*selected as usize].0.to_string();
+                    *caret_pos = text.len() as i32;
+                    *selected = 0;
+                }
+            }
+            _ => {
+                // some other key
+                // try to interpret the key as a character
+                let c = xc.keyevent_to_char(e);
+                if !c.is_ascii_control() {
+                    text.push(c);
+                    *caret_pos += 1;
+                    *selected = 0;
+                }
             }
         }
     }
-    x11::Action::Run
+    Action::Run
 }
 
 fn run_command(command: &str) {
     let mut parts = command.split(' ');
     if !command.is_empty() {
         let mut c = Command::new(parts.next().unwrap());
-        for arg in parts {
-            c.arg(arg);
-        }
+        c.args(parts);
         let _ = c.spawn();
     }
 }

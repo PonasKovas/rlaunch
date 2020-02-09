@@ -1,6 +1,6 @@
 use std::env::var;
 use std::fs::{read_dir, read_to_string};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::time::Instant;
 
 pub type Apps = Vec<App>;
@@ -13,7 +13,7 @@ pub struct App {
 }
 
 fn do_read_applications<'a>(
-    apps: Arc<Mutex<Apps>>,
+    apps: &Mutex<Apps>,
     dirs: impl IntoIterator<Item = &'a str>,
     nondesktop: bool,
 ) {
@@ -114,7 +114,7 @@ fn do_read_applications<'a>(
     apps.lock().unwrap().sort_unstable();
 }
 
-pub fn read_applications(apps: Arc<Mutex<Apps>>, scan_path: bool) {
+pub fn read_applications(apps: &Mutex<Apps>, scan_path: bool) {
     let dirs: &[&str] = &[
         "/usr/share/applications",
         "/usr/local/share/applications",

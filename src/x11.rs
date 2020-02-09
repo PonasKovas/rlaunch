@@ -186,12 +186,13 @@ impl X11Context {
     }
     pub fn add_color_to_trc(&self, trc: &mut TextRenderingContext, color: u64) -> usize {
         unsafe {
+            let color = CString::new(format!("#{:06X}", color)).unwrap();
             let mut xftcolor: xft::XftColor = MaybeUninit::zeroed().assume_init();
             (self.xft.XftColorAllocName)(
                 self.display,
                 trc.visual,
                 trc.cmap,
-                CString::new(format!("#{:06X}", color)).unwrap().as_ptr(),
+                color.as_ptr(),
                 &mut xftcolor,
             );
 
