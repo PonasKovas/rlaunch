@@ -5,7 +5,7 @@ use std::time::Instant;
 
 pub type Apps = Vec<App>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct App {
     pub name: String,
     pub exec: String,
@@ -105,6 +105,9 @@ fn do_read_applications<'a>(
             apps.lock().unwrap().push(App{name, exec, show_terminal:terminal});
         }
     }
+    
+    // sort the apps alpabetically
+    apps.lock().unwrap().sort_unstable();
 }
 
 pub fn read_applications(apps: Arc<Mutex<Apps>>, scan_path: bool) {

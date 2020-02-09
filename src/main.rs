@@ -1,17 +1,12 @@
 use std::cmp::{max, min};
-use std::ffi::CString;
-use std::mem;
-use std::os::raw::*;
 use std::process::Command;
-use std::ptr;
-use std::ptr::null_mut;
 use std::sync::{Arc, Mutex};
-use std::thread::{self, sleep};
-use std::time::Duration;
+use std::thread;
 use x11_dl::xlib;
 
 mod applications;
 mod arguments;
+mod x11;
 
 fn main() {
     let args = arguments::get_args();
@@ -21,295 +16,197 @@ fn main() {
     let path = args.path;
     thread::spawn(move || applications::read_applications(apps_clone, path));
 
-    let mut cursor_pos = 0;
+    let mut caret_pos = 0;
     let mut text = String::new();
     let mut suggestions = Vec::<(String, usize)>::new();
     let mut selected = 0;
-    unsafe {
-        // Load Xlib library.
-        let xlib = xlib::Xlib::open().unwrap();
 
-        // Open display connection.
-        let display = (xlib.XOpenDisplay)(ptr::null());
+    // initialize xlib context
+    let xc = x11::X11Context::new();
 
-        if display.is_null() {
-            panic!("XOpenDisplay failed");
-        }
+    // get screen width and the position where to map window
+    let mut screen_width = 0;
+    let mut window_pos = (0, 0);
 
-        // Create window.
-        let screen = (xlib.XDefaultScreen)(display);
-        let root = (xlib.XRootWindow)(display, screen);
-
-        let (mut window_x, mut window_y) = (0, 0);
-        let mut screen_width = 0;
-
-        let xin = x11_dl::xinerama::Xlib::open().expect("couldn't load xinerama");
-        let mut screens_number = 0;
-        let screens = (xin.XineramaQueryScreens)(display, &mut screens_number);
-        // get mouse position
-        let (mut mouse_x, mut mouse_y) = (0, 0);
-        (xlib.XQueryPointer)(display, root, &mut 0, &mut 0, &mut mouse_x, &mut mouse_y, &mut 0, &mut 0, &mut 0);
-        for i in 0..screens_number {
-            let screen = *(screens.offset(i as isize));
-            if in_rect((mouse_x, mouse_y), (screen.x_org, screen.y_org), (screen.width, screen.height)) {
-                screen_width = screen.width as u32;
-                window_x = screen.x_org as i32;
-                window_y = if args.bottom {
-                    screen.y_org as i32 + screen.height as i32 - args.height as i32
-                } else {
-                    screen.y_org as i32
-                };
-                break;
-            }
-        }
-
-        let mut attributes: xlib::XSetWindowAttributes = mem::MaybeUninit::uninit().assume_init();
-        attributes.background_pixel = args.color0;
-        attributes.override_redirect = xlib::True;
-
-        let window = (xlib.XCreateWindow)(
-            display,
-            root,
-            window_x,
-            window_y,
-            screen_width,
-            args.height,
-            0,
-            xlib::CopyFromParent,
-            xlib::InputOutput as c_uint,
-            ptr::null_mut(),
-            xlib::CWBackPixel | xlib::CWOverrideRedirect,
-            &mut attributes,
-        );
-
-        // Grab the keyboard
-        for _ in 0..1000 {
-            if (xlib.XGrabKeyboard)(
-                display,
-                root,
-                xlib::True,
-                xlib::GrabModeAsync,
-                xlib::GrabModeAsync,
-                xlib::CurrentTime,
-            ) == 0
-            {
-                // Successfully grabbed keyboard
-                break;
+    let mouse_pos = xc.get_mouse_pos();
+    for screen in xc.get_screens() {
+        // multiple monitors support
+        if in_rect((mouse_pos.0, mouse_pos.1), (screen.x_org, screen.y_org), (screen.width, screen.height)) {
+            screen_width = screen.width as u32;
+            window_pos.0 = screen.x_org as i32;
+            window_pos.1 = if args.bottom {
+                screen.y_org as i32 + screen.height as i32 - args.height as i32
             } else {
-                // Try again
-                sleep(Duration::from_nanos(1_000_000)); // 1 millisecond
-            }
-        }
-
-        // initialize graphics context
-        let mut xgc_values: xlib::XGCValues = mem::MaybeUninit::uninit().assume_init();
-        xgc_values.font =
-            (xlib.XLoadFont)(display, CString::new(args.font.clone()).unwrap().as_ptr());
-        let gc = (xlib.XCreateGC)(display, window, xlib::GCFont as u64, &mut xgc_values);
-
-        let font_size = {
-            let font_struct = (xlib.XQueryFont)(display, xgc_values.font);
-            (*font_struct).max_bounds.ascent + (*font_struct).max_bounds.descent
-        };
-
-        // Show window and raise to the top
-        (xlib.XMapRaised)(display, window);
-
-        // Main loop.
-        let mut event: xlib::XEvent = mem::MaybeUninit::uninit().assume_init();
-
-        loop {
-            let suggestions_to_fit = update_suggestions(
-                screen_width,
-                font_size as u32,
-                &text,
-                &mut suggestions,
-                &apps,
-            );
-            render_bar(
-                &xlib,
-                display,
-                window,
-                gc,
-                screen_width,
-                font_size as i32,
-                &text,
-                cursor_pos,
-                &suggestions,
-                suggestions_to_fit,
-                selected,
-                &args,
-            );
-
-            if (xlib.XCheckMaskEvent)(display, xlib::KeyPressMask, &mut event) == 0 {
-                // no events available
-                sleep(Duration::from_nanos(1_000_000_000 / 60));
-            } else {
-                match event.get_type() {
-                    xlib::KeyPress => {
-                        if event.key.keycode == 9 {
-                            // escape
-                            break;
-                        } else if event.key.keycode == 113 {
-                            // left arrow
-                            if selected == 0 {
-                                cursor_pos = max(0, cursor_pos - 1);
-                            } else {
-                                selected -= 1;
-                            }
-                        } else if event.key.keycode == 114 {
-                            // right arrow
-                            if cursor_pos == text.len() as i32 {
-                                selected = min(selected + 1, suggestions_to_fit - 1);
-                            } else {
-                                cursor_pos += 1;
-                            }
-                        } else if event.key.keycode == 22 {
-                            // backspace
-                            if cursor_pos != 0 {
-                                text.remove(cursor_pos as usize - 1);
-                                cursor_pos -= 1;
-                            }
-                        } else if event.key.keycode == 36 {
-                            // enter
-                            // if no suggestions available, just run the text, otherwise launch selected application
-                            if suggestions.len() == 0 {
-                                run_command(&format!("{}", text));
-                            } else {
-                                let app = &apps.lock().unwrap()[suggestions[selected as usize].1];
-                                if app.show_terminal {
-                                    run_command(&format!("{} -e \"{}\"", args.terminal, app.exec));
-                                } else {
-                                    run_command(&format!("{}", app.exec));
-                                }
-                            }
-                            break;
-                        } else if event.key.keycode == 23 {
-                            // tab
-                            if suggestions.len() != 0 {
-                                text = suggestions[selected as usize].0.to_string();
-                                cursor_pos = text.len() as i32;
-                                selected = 0;
-                            }
-                        } else {
-                            let mut cs: i8 = 0;
-                            (xlib.XLookupString)(
-                                &mut event.key as *mut xlib::XKeyEvent,
-                                &mut cs as *mut i8,
-                                1,
-                                null_mut(),
-                                null_mut(),
-                            );
-                            let c = cs as u8 as char;
-                            if !c.is_ascii_control() {
-                                text.push(cs as u8 as char);
-                                cursor_pos += 1;
-                                selected = 0;
-                            }
-                        }
-                    }
-
-                    _ => (),
-                }
-            }
-        }
-
-        // Shut down.
-        (xlib.XCloseDisplay)(display);
-    }
-}
-
-unsafe fn render_bar(
-    xlib: &xlib::Xlib,
-    display: *mut xlib::_XDisplay,
-    window: xlib::Window,
-    gc: xlib::GC,
-    screen_width: u32,
-    font_size: i32,
-    text: &str,
-    cursor_pos: i32,
-    suggestions: &Vec<(String, usize)>,
-    suggestions_to_fit: u8,
-    selected: u8,
-    args: &arguments::Args,
-) {
-    // clear
-    (xlib.XSetForeground)(display, gc, args.color0);
-    (xlib.XFillRectangle)(display, window, gc, 0, 0, screen_width, args.height);
-
-    let text_y = args.height as i32 / 2 + font_size / 4;
-
-    // render the text
-    (xlib.XSetForeground)(display, gc, args.color2);
-    (xlib.XDrawString)(
-        display,
-        window,
-        gc,
-        2,
-        text_y,
-        text.as_ptr() as *const i8,
-        text.len() as i32,
-    );
-    (xlib.XFillRectangle)(display, window, gc, cursor_pos * 9, 2, 2, args.height - 4); // caret
-
-    // render suggestions
-    let mut x = (screen_width as f32 * 0.3).floor() as u32;
-    for i in 0..suggestions_to_fit {
-        let name = &suggestions[i as usize].0;
-        let width = (name.len() + 2) as u32 * 9;
-        // if selected, render rectangle below
-        if selected == i {
-            (xlib.XSetForeground)(display, gc, args.color1);
-            (xlib.XFillRectangle)(display, window, gc, x as i32, 0, width, args.height);
-        }
-        // render text
-        (xlib.XSetForeground)(display, gc, args.color3);
-        (xlib.XDrawString)(
-            display,
-            window,
-            gc,
-            x as i32 + 9,
-            text_y,
-            name.as_ptr() as *const i8,
-            name.len() as i32,
-        );
-        x += width
-    }
-}
-
-fn update_suggestions(
-    screen_width: u32,
-    font_size: u32,
-    text: &str,
-    suggestions: &mut Vec<(String, usize)>,
-    apps: &Arc<Mutex<applications::Apps>>,
-) -> u8 {
-    let char_width = font_size / 2;
-
-    suggestions.clear();
-    // iterate over all application names
-    let apps_lock = apps.lock().unwrap();
-    for i in 0..(*apps_lock).len() {
-        if apps_lock[i].name.to_lowercase().contains(&text.to_lowercase()) {
-            suggestions.push((apps_lock[i].name.clone(), i));
-        }
-    }
-
-    // sort the suggestions alphabetically
-    suggestions.sort_unstable();
-
-    let mut suggestions_to_fit = 0;
-    let mut x = (screen_width as f32 * 0.3).floor() as u32;
-    for (suggestion, _) in suggestions {
-        if x + (suggestion.len() as u32 + 2) * char_width <= screen_width {
-            x += char_width * (suggestion.len() as u32 + 2);
-            suggestions_to_fit += 1;
-        } else {
+                screen.y_org as i32
+            };
             break;
         }
     }
 
-    suggestions_to_fit
+    // create the window
+    let window = xc.create_window(window_pos.0, window_pos.1, screen_width, args.height);
+
+    xc.grab_keyboard();
+
+    let font = xc.load_font(&args.font);
+    let font_size = xc.get_font_size(font);
+
+    let gc = xc.init_gc(window, font);
+
+    // show window
+    xc.map_window(window);
+
+    xc.run(|xc, event| {
+        update_suggestions(
+            &mut suggestions,
+            screen_width,
+            font_size,
+            &text,
+            &apps,
+        );
+        render_bar(
+            &xc,
+            window,
+            gc,
+            screen_width,
+            font_size,
+            &text,
+            caret_pos,
+            &suggestions,
+            selected,
+            &args,
+        );
+        match event {
+            None => x11::Action::Run,
+            Some(e) => {
+                handle_event(&xc, e, &mut selected, &mut caret_pos, &mut text, &suggestions, &apps, &args.terminal)
+            },
+        }
+    });
+
+    xc.shutdown();
+}
+
+fn render_bar(
+        xc: &x11::X11Context,
+        window: u64,
+        gc: *mut xlib::_XGC,
+        width: u32,
+        font_size: i32,
+        text: &str,
+        caret_pos: i32,
+        suggestions: &Vec<(String, usize)>,
+        selected: u8,
+        args: &arguments::Args
+    ) {
+        let char_width = font_size / 2;
+        // clear
+        xc.draw_rect(window, gc, args.color0, 0, 0, width, args.height);
+
+        // render the typed text
+        let text_y = args.height as i32 / 2 + font_size / 4;
+        xc.render_text(window, gc, args.color2, 0, text_y, text);
+        // and the caret
+        xc.draw_rect(window, gc, args.color2, caret_pos * char_width, 2, 2, args.height - 4);
+
+        // render suggestions
+        let mut x = (width as f32 * 0.3).floor() as i32;
+        for i in 0..suggestions.len() {
+            let name = &suggestions[i].0;
+            let name_width = (name.len() + 2) as i32 * char_width;
+            // if selected, render rectangle below
+            if selected as usize == i {
+                xc.draw_rect(window, gc, args.color1, x, 0, name_width as u32, args.height);
+            }
+
+            xc.render_text(window, gc, args.color3, x + char_width, text_y, name);
+
+            x += name_width;
+        }
+}
+
+fn update_suggestions(suggestions: &mut Vec<(String, usize)>, width: u32, font_size: i32, text: &str, apps: &Arc<Mutex<applications::Apps>>) {
+    let char_width = font_size / 2;
+
+    suggestions.clear();
+    // iterate over application names
+    // and find those that contain the typed text
+    let mut x = 0;
+    let max_width = (width as f32 * 0.7).floor() as i32;
+    let apps_lock = apps.lock().unwrap();
+    for i in 0..(*apps_lock).len() {
+        let name = &apps_lock[i].name;
+        if name.to_lowercase().contains(&text.to_lowercase()) {
+            if x + (name.len() as i32 + 2) * char_width <= max_width {
+                x += char_width * (name.len() as i32 + 2);
+                suggestions.push((apps_lock[i].name.clone(), i));
+            } else {
+                break;
+            }
+        }
+    }
+}
+
+fn handle_event(xc: &x11::X11Context, event: &xlib::XEvent, selected: &mut u8, caret_pos: &mut i32, text: &mut String, suggestions: &Vec<(String, usize)>, apps: &Arc<Mutex<applications::Apps>>, terminal: &str) -> x11::Action {
+    match xc.xevent_to_xkeyevent(*event) {
+        Some(e) => {
+            if e.keycode == 9 { // escape
+                return x11::Action::Stop;
+            } else if e.keycode == 113 { // left arrow
+                if *selected == 0 {
+                    *caret_pos = max(0, *caret_pos - 1);
+                } else {
+                    *selected -= 1;
+                }
+            } else if e.keycode == 114 { // right arrow
+                if *caret_pos == text.len() as i32 {
+                    *selected = min(*selected + 1, suggestions.len() as u8 - 1);
+                } else {
+                    *caret_pos += 1;
+                }
+            } else if e.keycode == 22 { // backspace
+                if *caret_pos != 0 {
+                    text.remove(*caret_pos as usize - 1);
+                    *caret_pos -= 1;
+                }
+            } else if e.keycode == 36 { // enter
+                // if no suggestions available, just run the text, otherwise launch selected application
+                if suggestions.len() == 0 {
+                    run_command(&format!("{}", text));
+                } else {
+                    let app = &apps.lock().unwrap()[suggestions[*selected as usize].1];
+                    if app.show_terminal {
+                        run_command(&format!("{} -e \"{}\"", terminal, app.exec));
+                    } else {
+                        run_command(&format!("{}", app.exec));
+                    }
+                }
+                return x11::Action::Stop;
+            } else if e.keycode == 23 { // tab
+                if suggestions.len() != 0 {
+                    *text = suggestions[*selected as usize].0.to_string();
+                    *caret_pos = text.len() as i32;
+                    *selected = 0;
+                }
+            } else { // some other key
+                // try to interpret the key as a character
+                let c = xc.keyevent_to_char(e);
+                if !c.is_ascii_control() {
+                    text.push(c);
+                    *caret_pos += 1;
+                    *selected = 0;
+                }
+            }
+        },
+        None => {},
+    }
+    match event.get_type() {
+        xlib::KeyPress => {
+
+        }
+        _ => (),
+    }
+    x11::Action::Run
 }
 
 fn run_command(command: &str) {
