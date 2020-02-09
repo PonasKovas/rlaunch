@@ -51,7 +51,7 @@ fn do_read_applications<'a>(
                     if exec == "" && line.starts_with("Exec=") {
                         exec = line[5..].to_string();
                         // remove any arguments
-                        while let Option::Some(i) = exec.find('%') {
+                        while let Some(i) = exec.find('%') {
                             exec.replace_range(i..(i + 2), "");
                         }
                         // remove quotes if present
