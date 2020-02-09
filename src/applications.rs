@@ -1,5 +1,5 @@
 use std::env::var;
-use std::fs::{read_to_string, read_dir};
+use std::fs::{read_dir, read_to_string};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -51,18 +51,18 @@ fn do_read_applications<'a>(
                     if exec == "" && line.starts_with("Exec=") {
                         exec = line[5..].to_string();
                         // remove any arguments
-                        while let Option::Some(i) = exec.find("%") {
+                        while let Option::Some(i) = exec.find('%') {
                             exec.replace_range(i..(i + 2), "");
                         }
                         // remove quotes if present
-                        if exec.len() > 1 && exec.starts_with("\"") && exec.ends_with("\"") {
+                        if exec.len() > 1 && exec.starts_with('"') && exec.ends_with('"') {
                             exec = exec[1..exec.len() - 1].to_string();
                         }
                         exec = exec.trim().to_owned();
                     } else if name == "" && line.starts_with("Name=") {
                         name = line[5..].to_string();
                         // remove quotes if present
-                        if name.len() > 1 && name.starts_with("\"") && name.ends_with("\"") {
+                        if name.len() > 1 && name.starts_with('"') && name.ends_with('"') {
                             name = name[1..name.len() - 1].to_string();
                         }
                     } else if app_type == "" && line.starts_with("Type=") {
@@ -82,7 +82,7 @@ fn do_read_applications<'a>(
                     continue;
                 }
                 terminal.make_ascii_lowercase();
-                let terminal = if terminal == "" || terminal == "false" { false } else { true };
+                let terminal = !(terminal == "" || terminal == "false");
 
                 (name, exec, terminal)
             } else {
@@ -102,10 +102,14 @@ fn do_read_applications<'a>(
                 (name, exec, false)
             };
 
-            apps.lock().unwrap().push(App{name, exec, show_terminal:terminal});
+            apps.lock().unwrap().push(App {
+                name,
+                exec,
+                show_terminal: terminal,
+            });
         }
     }
-    
+
     // sort the apps alpabetically
     apps.lock().unwrap().sort_unstable();
 }
@@ -122,13 +126,11 @@ pub fn read_applications(apps: Arc<Mutex<Apps>>, scan_path: bool) {
     if scan_path {
         do_read_applications(
             apps,
-            dirs.iter()
-                .map(|dir| *dir)
-                .chain(var("PATH").unwrap().split(":")),
+            dirs.iter().copied().chain(var("PATH").unwrap().split(':')),
             true,
         );
     } else {
-        do_read_applications(apps, dirs.iter().map(|dir| *dir), false);
+        do_read_applications(apps, dirs.iter().copied(), false);
     }
 
     println!(

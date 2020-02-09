@@ -31,20 +31,21 @@ impl Iterator for Screens {
         if self.i < self.screens_number {
             let screen = unsafe { *(self.screens.offset(self.i as isize)) };
             self.i += 1;
-            return Some(screen);
+            Some(screen)
         } else {
-            return None;
+            None
         }
     }
 }
 
 impl X11Context {
-    pub fn new() -> Self {
+    pub fn new() -> Result<Self, &'static str> {
         unsafe {
             // Load Xlib library.
-            let xlib = xlib::Xlib::open().expect("failed to load xlib");
+            let xlib = xlib::Xlib::open().map_err(|_| "Failed to load XLib.")?;
 
-            let xin = x11_dl::xinerama::Xlib::open().expect("couldn't load xinerama");
+            // load xinerama
+            let xin = xinerama::Xlib::open().map_err(|_| "Failed to load Xinerama.")?;
 
             // Open display connection.
             let display = (xlib.XOpenDisplay)(null());
@@ -56,12 +57,12 @@ impl X11Context {
             let screen = (xlib.XDefaultScreen)(display);
             let root = (xlib.XRootWindow)(display, screen);
 
-            Self {
+            Ok(Self {
                 xlib,
                 xin,
                 display,
                 root,
-            }
+            })
         }
     }
     pub fn get_screens(&self) -> Screens {
@@ -180,7 +181,6 @@ impl X11Context {
             }
         }
     }
-
     pub fn draw_rect(
         &self,
         window: u64,

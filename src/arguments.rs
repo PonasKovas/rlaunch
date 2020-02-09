@@ -49,7 +49,7 @@ pub fn get_args() -> Args {
 }
 
 fn parse_color(string: &str) -> Result<u64, &str> {
-    if !string.starts_with("#") {
+    if !string.starts_with('#') {
         return Err("Color hex code must start with a #");
     }
     if string.len() != 7 {
