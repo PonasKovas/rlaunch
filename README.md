@@ -1,5 +1,5 @@
 
-# rlaunch
+# rlaunch ![Rust](https://github.com/PonasKovas/rlaunch/workflows/Rust/badge.svg?branch=actions) ![GitHub](https://img.shields.io/github/license/PonasKovas/rlaunch)
 
 rlaunch is a fast and light-weight application launcher for X11 written in Rust that I made because `dmenu` was too slow for me. I'm glad to say that indeed rlaunch works a lot faster than `dmenu` (at least for me, I haven't tested it on other computers).
 
