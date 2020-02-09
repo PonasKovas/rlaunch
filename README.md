@@ -12,7 +12,7 @@ This should work on all linux distributions and DEs that use X11, but if it does
 ### Usage
 
 ```
-rlaunch 1.1.0
+rlaunch 1.2.0
 A simple and light-weight tool for launching applications and running commands on X11.
 
 USAGE:
@@ -21,6 +21,7 @@ USAGE:
 FLAGS:
     -b, --bottom     Show the bar on the bottom of the screen
         --help       Prints help information
+    -p, --path       Scan the PATH variable
     -V, --version    Prints version information
 
 OPTIONS:
