@@ -55,14 +55,6 @@ fn parse_color(string: &str) -> Result<u64, &str> {
     if string.len() != 7 {
         return Err("Color hex code format: #RRGGBB");
     }
-    let mut color: u64 = 0;
-    for (i, c) in string[1..].as_bytes().chunks(2).enumerate() {
-        let hex = String::from_utf8_lossy(c);
-        let col = match u64::from_str_radix(&hex, 16) {
-            Ok(x) => x,
-            Err(_) => return Err("Couldn't parse color code"),
-        };
-        color += col << (2 - i) * 8;
-    }
-    Ok(color)
+
+    u64::from_str_radix(&string[1..], 16).map_err(|_| "Couldn't parse color code")
 }
