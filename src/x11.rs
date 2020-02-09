@@ -27,6 +27,15 @@ pub struct TextRenderingContext {
     draw: *mut xft::XftDraw,
 }
 
+pub struct GraphicsContext {
+    gc: *mut xlib::_XGC,
+    window: u64,
+}
+
+pub struct Window {
+    window: u64,
+}
+
 pub struct Screens {
     screens: *mut xinerama::XineramaScreenInfo,
     screens_number: i32,
@@ -105,30 +114,32 @@ impl X11Context {
             (x, y)
         }
     }
-    pub fn create_window(&self, x: i32, y: i32, width: u32, height: u32) -> u64 {
+    pub fn create_window(&self, x: i32, y: i32, width: u32, height: u32) -> Window {
         unsafe {
             let mut attributes: xlib::XSetWindowAttributes = MaybeUninit::zeroed().assume_init();
             attributes.override_redirect = xlib::True;
 
-            (self.xlib.XCreateWindow)(
-                self.display,
-                self.root,
-                x,
-                y,
-                width,
-                height,
-                0,
-                xlib::CopyFromParent,
-                xlib::InputOutput as u32,
-                null_mut(),
-                xlib::CWOverrideRedirect,
-                &mut attributes,
-            )
+            Window {
+                window: (self.xlib.XCreateWindow)(
+                    self.display,
+                    self.root,
+                    x,
+                    y,
+                    width,
+                    height,
+                    0,
+                    xlib::CopyFromParent,
+                    xlib::InputOutput as u32,
+                    null_mut(),
+                    xlib::CWOverrideRedirect,
+                    &mut attributes,
+                ),
+            }
         }
     }
-    pub fn map_window(&self, window: u64) {
+    pub fn map_window(&self, window: &Window) {
         unsafe {
-            (self.xlib.XMapRaised)(self.display, window);
+            (self.xlib.XMapRaised)(self.display, window.window);
         }
     }
     pub fn grab_keyboard(&self) {
@@ -152,7 +163,7 @@ impl X11Context {
             }
         }
     }
-    pub fn init_trc(&self, window: u64, font: &str) -> TextRenderingContext {
+    pub fn init_trc(&self, window: &Window, font: &str) -> TextRenderingContext {
         unsafe {
             let cfontname = CString::new(font).unwrap();
 
@@ -163,7 +174,7 @@ impl X11Context {
             let font = (self.xft.XftFontOpenName)(self.display, screen, cfontname.as_ptr());
             let colors = Vec::new();
 
-            let draw = (self.xft.XftDrawCreate)(self.display, window, visual, cmap);
+            let draw = (self.xft.XftDrawCreate)(self.display, window.window, visual, cmap);
             TextRenderingContext {
                 visual,
                 cmap,
@@ -189,10 +200,13 @@ impl X11Context {
             index
         }
     }
-    pub fn init_gc(&self, window: u64) -> *mut xlib::_XGC {
+    pub fn init_gc(&self, window: &Window) -> GraphicsContext {
         unsafe {
             let mut xgc_values: xlib::XGCValues = MaybeUninit::zeroed().assume_init();
-            (self.xlib.XCreateGC)(self.display, window, 0, &mut xgc_values)
+            GraphicsContext {
+                gc: (self.xlib.XCreateGC)(self.display, window.window, 0, &mut xgc_values),
+                window: window.window,
+            }
         }
     }
     pub fn run<F>(&self, mut handle_events: F)
@@ -223,8 +237,7 @@ impl X11Context {
     }
     pub fn draw_rect(
         &self,
-        window: u64,
-        gc: *mut xlib::_XGC,
+        gc: &GraphicsContext,
         color: u64,
         x: i32,
         y: i32,
@@ -232,8 +245,8 @@ impl X11Context {
         height: u32,
     ) {
         unsafe {
-            (self.xlib.XSetForeground)(self.display, gc, color);
-            (self.xlib.XFillRectangle)(self.display, window, gc, x, y, width, height);
+            (self.xlib.XSetForeground)(self.display, gc.gc, color);
+            (self.xlib.XFillRectangle)(self.display, gc.window, gc.gc, x, y, width, height);
         }
     }
     pub fn render_text(

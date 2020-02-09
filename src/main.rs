@@ -68,22 +68,21 @@ fn main() {
         }
         h
     };
-    let mut trc = xc.init_trc(window, &format!("{}:size=12:antialias=true", args.font));
+    let mut trc = xc.init_trc(&window, &format!("{}:size=12:antialias=true", args.font));
     xc.add_color_to_trc(&mut trc, args.color2);
     xc.add_color_to_trc(&mut trc, args.color3);
 
-    let gc = xc.init_gc(window);
+    let gc = xc.init_gc(&window);
 
     // show window
-    xc.map_window(window);
+    xc.map_window(&window);
 
     xc.run(|xc, event| {
         update_suggestions(&xc, &trc, &mut suggestions, screen_width, &text, &apps);
         render_bar(
             &xc,
             &trc,
-            window,
-            gc,
+            &gc,
             screen_width,
             &text,
             caret_pos,
@@ -111,8 +110,7 @@ fn main() {
 fn render_bar(
     xc: &x11::X11Context,
     trc: &x11::TextRenderingContext,
-    window: u64,
-    gc: *mut xlib::_XGC,
+    gc: &x11::GraphicsContext,
     width: u32,
     text: &str,
     caret_pos: i32,
@@ -123,14 +121,13 @@ fn render_bar(
 ) {
     let text_y = args.height as i32 / 2 + font_height / 2;
     // clear
-    xc.draw_rect(window, gc, args.color0, 0, 0, width, args.height);
+    xc.draw_rect(&gc, args.color0, 0, 0, width, args.height);
 
     // render the typed text
     xc.render_text(&trc, 0, 0, text_y, text);
     // and the caret
     xc.draw_rect(
-        window,
-        gc,
+        &gc,
         args.color2,
         xc.get_text_dimensions(&trc, &text[0..caret_pos as usize]).0 as i32,
         2,
@@ -145,15 +142,7 @@ fn render_bar(
         let name_width = xc.get_text_dimensions(&trc, &name).0 as i32;
         // if selected, render rectangle below
         if selected as usize == i {
-            xc.draw_rect(
-                window,
-                gc,
-                args.color1,
-                x,
-                0,
-                name_width as u32 + 16,
-                args.height,
-            );
+            xc.draw_rect(&gc, args.color1, x, 0, name_width as u32 + 16, args.height);
         }
 
         xc.render_text(&trc, 1, x + 8, text_y, name);
