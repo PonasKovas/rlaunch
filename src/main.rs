@@ -235,7 +235,7 @@ fn handle_event(
                 // try to interpret the key as a character
                 let c = xc.keyevent_to_char(e);
                 if !c.is_ascii_control() {
-                    state.text.push(c);
+                    state.text.insert(state.caret_pos as usize, c);
                     state.caret_pos += 1;
                     state.selected = 0;
                 }
