@@ -1,6 +1,6 @@
 [package]
 name = "rlaunch"
-version = "1.3.2"
+version = "1.3.3"
 authors = ["Ponas <mykolas.peteraitis@gmail.com>"]
 edition = "2018"
 
