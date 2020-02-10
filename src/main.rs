@@ -5,6 +5,7 @@ mod x11;
 use applications::{read_applications, Apps};
 use arguments::{get_args, Args};
 use std::cmp::{max, min};
+use std::process::exit;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -28,8 +29,8 @@ fn main() {
     let xc = match X11Context::new() {
         Ok(v) => v,
         Err(e) => {
-            println!("Error: {:?}", e);
-            return;
+            eprintln!("Error: {:?}", e);
+            exit(1);
         }
     };
 

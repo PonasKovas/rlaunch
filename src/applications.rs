@@ -22,7 +22,7 @@ fn do_read_applications<'a>(
         let files_iterator = match read_dir(dir) {
             Ok(iterator) => iterator,
             Err(e) => {
-                println!("Couldn't read the files in {} ({})", dir, e);
+                eprintln!("Couldn't read the files in {} ({})", dir, e);
                 continue;
             }
         };
