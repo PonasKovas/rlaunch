@@ -114,7 +114,7 @@ impl X11Context {
             (x, y)
         }
     }
-    pub fn create_window(&self, x: i32, y: i32, width: u32, height: u32) -> Window {
+    pub fn create_window(&self, pos: (i32, i32), width: u32, height: u32) -> Window {
         unsafe {
             let mut attributes: xlib::XSetWindowAttributes = MaybeUninit::zeroed().assume_init();
             attributes.override_redirect = xlib::True;
@@ -123,8 +123,8 @@ impl X11Context {
                 window: (self.xlib.XCreateWindow)(
                     self.display,
                     self.root,
-                    x,
-                    y,
+                    pos.0,
+                    pos.1,
                     width,
                     height,
                     0,
@@ -184,6 +184,7 @@ impl X11Context {
             }
         }
     }
+    /// returns the index to use as the color argument in xc::render_text
     pub fn add_color_to_trc(&self, trc: &mut TextRenderingContext, color: u64) -> usize {
         unsafe {
             let color = CString::new(format!("#{:06X}", color)).unwrap();

@@ -12,6 +12,20 @@ use std::thread;
 use x11::{Action, GraphicsContext, TextRenderingContext, X11Context};
 use x11_dl::xlib;
 
+const KEY_ESCAPE: u32 = 9;
+const KEY_LEFT: u32 = 113;
+const KEY_RIGHT: u32 = 114;
+const KEY_BACKSPACE: u32 = 22;
+const KEY_ENTER: u32 = 36;
+const KEY_TAB: u32 = 23;
+
+struct State {
+    caret_pos: i32,
+    text: String,
+    suggestions: Vec<(String, usize)>,
+    selected: u8,
+}
+
 fn main() {
     let args = get_args();
     // spawn a thread for reading all applications
@@ -20,10 +34,12 @@ fn main() {
     let path = args.path;
     thread::spawn(move || read_applications(&apps_clone, path));
 
-    let mut caret_pos = 0;
-    let mut text = String::new();
-    let mut suggestions = Vec::<(String, usize)>::new();
-    let mut selected = 0;
+    let mut state = State {
+        caret_pos: 0,
+        text: String::new(),
+        suggestions: Vec::new(),
+        selected: 0,
+    };
 
     // initialize xlib context
     let xc = match X11Context::new() {
@@ -58,7 +74,7 @@ fn main() {
     }
 
     // create the window
-    let window = xc.create_window(window_pos.0, window_pos.1, screen_width, args.height);
+    let window = xc.create_window(window_pos, screen_width, args.height);
 
     xc.grab_keyboard();
 
@@ -82,31 +98,11 @@ fn main() {
     xc.map_window(&window);
 
     xc.run(|xc, event| {
-        update_suggestions(&xc, &trc, &mut suggestions, screen_width, &text, &apps);
-        render_bar(
-            &xc,
-            &trc,
-            &gc,
-            screen_width,
-            &text,
-            caret_pos,
-            &suggestions,
-            selected,
-            &args,
-            font_height,
-        );
+        update_suggestions(&xc, &trc, &mut state, screen_width, &apps);
+        render_bar(&xc, &trc, &gc, screen_width, &state, &args, font_height);
         match event {
             None => Action::Run,
-            Some(e) => handle_event(
-                &xc,
-                e,
-                &mut selected,
-                &mut caret_pos,
-                &mut text,
-                &suggestions,
-                &apps,
-                &args.terminal,
-            ),
+            Some(e) => handle_event(&xc, e, &mut state, &apps, &args.terminal),
         }
     });
 }
@@ -116,10 +112,7 @@ fn render_bar(
     trc: &TextRenderingContext,
     gc: &GraphicsContext,
     width: u32,
-    text: &str,
-    caret_pos: i32,
-    suggestions: &[(String, usize)],
-    selected: u8,
+    state: &State,
     args: &Args,
     font_height: i32,
 ) {
@@ -128,12 +121,13 @@ fn render_bar(
     xc.draw_rect(&gc, args.color0, 0, 0, width, args.height);
 
     // render the typed text
-    xc.render_text(&trc, 0, 0, text_y, text);
+    xc.render_text(&trc, 0, 0, text_y, &state.text);
     // and the caret
     xc.draw_rect(
         &gc,
         args.color2,
-        xc.get_text_dimensions(&trc, &text[0..caret_pos as usize]).0 as i32,
+        xc.get_text_dimensions(&trc, &state.text[0..state.caret_pos as usize])
+            .0 as i32,
         2,
         2,
         args.height - 4,
@@ -141,11 +135,11 @@ fn render_bar(
 
     // render suggestions
     let mut x = (width as f32 * 0.3).floor() as i32;
-    for (i, suggestion) in suggestions.iter().enumerate() {
+    for (i, suggestion) in state.suggestions.iter().enumerate() {
         let name = &suggestion.0;
         let name_width = xc.get_text_dimensions(&trc, &name).0 as i32;
         // if selected, render rectangle below
-        if selected as usize == i {
+        if state.selected as usize == i {
             xc.draw_rect(&gc, args.color1, x, 0, name_width as u32 + 16, args.height);
         }
 
@@ -158,12 +152,11 @@ fn render_bar(
 fn update_suggestions(
     xc: &X11Context,
     trc: &TextRenderingContext,
-    suggestions: &mut Vec<(String, usize)>,
+    state: &mut State,
     width: u32,
-    text: &str,
     apps: &Mutex<applications::Apps>,
 ) {
-    suggestions.clear();
+    state.suggestions.clear();
     // iterate over application names
     // and find those that contain the typed text
     let mut x = 0;
@@ -171,11 +164,11 @@ fn update_suggestions(
     let apps_lock = apps.lock().unwrap();
     for i in 0..(*apps_lock).len() {
         let name = &apps_lock[i].name;
-        if name.to_lowercase().contains(&text.to_lowercase()) {
+        if name.to_lowercase().contains(&state.text.to_lowercase()) {
             let width = xc.get_text_dimensions(&trc, &name).0 as i32;
             if x + width <= max_width {
                 x += width;
-                suggestions.push((apps_lock[i].name.clone(), i));
+                state.suggestions.push((apps_lock[i].name.clone(), i));
             } else {
                 break;
             }
@@ -186,50 +179,42 @@ fn update_suggestions(
 fn handle_event(
     xc: &X11Context,
     event: &xlib::XEvent,
-    selected: &mut u8,
-    caret_pos: &mut i32,
-    text: &mut String,
-    suggestions: &[(String, usize)],
+    state: &mut State,
     apps: &Mutex<applications::Apps>,
     terminal: &str,
 ) -> Action {
     if let Some(e) = xc.xevent_to_xkeyevent(*event) {
         match e.keycode {
-            9 => {
-                // escape
+            KEY_ESCAPE => {
                 return Action::Stop;
             }
-            113 => {
-                // left arrow
-                if *selected == 0 {
-                    *caret_pos = max(0, *caret_pos - 1);
+            KEY_LEFT => {
+                if state.selected == 0 {
+                    state.caret_pos = max(0, state.caret_pos - 1);
                 } else {
-                    *selected -= 1;
+                    state.selected -= 1;
                 }
             }
-            114 => {
-                // right arrow
-                if *caret_pos == text.len() as i32 {
-                    *selected = min(*selected + 1, suggestions.len() as u8 - 1);
+            KEY_RIGHT => {
+                if state.caret_pos == state.text.len() as i32 {
+                    state.selected = min(state.selected + 1, state.suggestions.len() as u8 - 1);
                 } else {
-                    *caret_pos += 1;
+                    state.caret_pos += 1;
                 }
             }
-            22 => {
-                // backspace
-                if *caret_pos != 0 {
-                    text.remove(*caret_pos as usize - 1);
-                    *caret_pos -= 1;
-                    *selected = 0;
+            KEY_BACKSPACE => {
+                if state.caret_pos != 0 {
+                    state.text.remove(state.caret_pos as usize - 1);
+                    state.caret_pos -= 1;
+                    state.selected = 0;
                 }
             }
-            36 => {
-                // enter
+            KEY_ENTER => {
                 // if no suggestions available, just run the text, otherwise launch selected application
-                if suggestions.is_empty() {
-                    run_command(text);
+                if state.suggestions.is_empty() {
+                    run_command(&state.text);
                 } else {
-                    let app = &apps.lock().unwrap()[suggestions[*selected as usize].1];
+                    let app = &apps.lock().unwrap()[state.suggestions[state.selected as usize].1];
                     if app.show_terminal {
                         run_command(&format!("{} -e \"{}\"", terminal, app.exec));
                     } else {
@@ -238,12 +223,11 @@ fn handle_event(
                 }
                 return Action::Stop;
             }
-            23 => {
-                // tab
-                if !suggestions.is_empty() {
-                    *text = suggestions[*selected as usize].0.to_string();
-                    *caret_pos = text.len() as i32;
-                    *selected = 0;
+            KEY_TAB => {
+                if !state.suggestions.is_empty() {
+                    state.text = state.suggestions[state.selected as usize].0.to_string();
+                    state.caret_pos = state.text.len() as i32;
+                    state.selected = 0;
                 }
             }
             _ => {
@@ -251,9 +235,9 @@ fn handle_event(
                 // try to interpret the key as a character
                 let c = xc.keyevent_to_char(e);
                 if !c.is_ascii_control() {
-                    text.push(c);
-                    *caret_pos += 1;
-                    *selected = 0;
+                    state.text.push(c);
+                    state.caret_pos += 1;
+                    state.selected = 0;
                 }
             }
         }
