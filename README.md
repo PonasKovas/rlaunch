@@ -49,7 +49,7 @@ You will need `cargo` for this.
 ```
 $ git clone https://github.com/PonasKovas/rlaunch.git
 $ cd rlaunch
-$ carto build --release
+$ cargo build --release
 ```
 After running these commands, the compiled binary will be `./target/release/rlaunch`
 
