@@ -12,7 +12,7 @@ This should work on all linux distributions and DEs that use X11, but if it does
 ### Usage
 
 ```
-rlaunch 1.3.0
+rlaunch 1.3.4
 A simple and light-weight tool for launching applications and running commands on X11.
 
 USAGE:

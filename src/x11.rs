@@ -277,18 +277,31 @@ impl X11Context {
     }
     pub fn get_text_dimensions(&self, trc: &TextRenderingContext, text: &str) -> (u16, u16) {
         unsafe {
-            let ctext = CString::new(text).unwrap();
+            // Some fonts treat a single space at the end weirdly
+            // which makes typing a bit confusing, so we will add a '/'
+            // to the end and then remove it's width from the total width
+            let dot = CString::new("/").unwrap();
+            let owned_text = text.to_owned();
+            let ctext = CString::new(owned_text + "/").unwrap();
 
-            let mut ext = MaybeUninit::zeroed().assume_init();
+            let mut total_ext = MaybeUninit::zeroed().assume_init();
             (self.xft.XftTextExtentsUtf8)(
                 self.display,
                 trc.font,
                 ctext.as_ptr() as *mut u8,
-                text.len() as i32,
-                &mut ext,
+                text.len() as i32 + 1,
+                &mut total_ext,
+            );
+            let mut dot_ext = MaybeUninit::zeroed().assume_init();
+            (self.xft.XftTextExtentsUtf8)(
+                self.display,
+                trc.font,
+                dot.as_ptr() as *mut u8,
+                1,
+                &mut dot_ext,
             );
 
-            (ext.width, ext.height)
+            (total_ext.width - dot_ext.width, total_ext.height)
         }
     }
     pub fn keyevent_to_char(&self, mut keyevent: xlib::XKeyEvent) -> char {
