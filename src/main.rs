@@ -146,12 +146,17 @@ fn render_bar(
         let mut progress_bar_color = args.color4;
         if let Some(t) = state.progress_finished {
             let intensity = (0.5 - t.elapsed().as_secs_f32()).max(0.0) * 2.0;
-            let r = (((args.color0 >> 16) as u8) as f32 * (1.0 - intensity) + 255_f32 * intensity)
+            let (or, og, ob) = (
+                (progress_bar_color >> 16) as u8 as f32,
+                (progress_bar_color >> 8) as u8 as f32,
+                (progress_bar_color) as u8 as f32,
+            );
+            let r = (((args.color0 >> 16) as u8) as f32 * (1.0 - intensity) + or * intensity)
                 .round() as u64;
-            let g = (((args.color0 >> 8) as u8) as f32 * (1.0 - intensity) + 255_f32 * intensity)
-                .round() as u64;
-            let b = (((args.color0) as u8) as f32 * (1.0 - intensity) + 255_f32 * intensity).round()
+            let g = (((args.color0 >> 8) as u8) as f32 * (1.0 - intensity) + og * intensity).round()
                 as u64;
+            let b =
+                (((args.color0) as u8) as f32 * (1.0 - intensity) + ob * intensity).round() as u64;
             progress_bar_color = (r << 16) + (g << 8) + b;
         }
         xc.draw_rect(
