@@ -9,6 +9,7 @@ use std::process::exit;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Instant;
 use x11::{Action, GraphicsContext, TextRenderingContext, X11Context};
 use x11_dl::xlib;
 
@@ -24,6 +25,8 @@ struct State {
     text: String,
     suggestions: Vec<(String, usize)>,
     selected: u8,
+    progress: f32,
+    progress_finished: Option<Instant>,
 }
 
 fn main() {
@@ -32,13 +35,17 @@ fn main() {
     let apps = Arc::new(Mutex::new(Apps::new()));
     let apps_clone = apps.clone();
     let path = args.path;
-    thread::spawn(move || read_applications(&apps_clone, path));
+    let progress = Arc::new(Mutex::new((0, 1)));
+    let progress_clone = progress.clone();
+    thread::spawn(move || read_applications(&apps_clone, path, &progress_clone));
 
     let mut state = State {
         caret_pos: 0,
         text: String::new(),
         suggestions: Vec::new(),
         selected: 0,
+        progress: 0.0,
+        progress_finished: None,
     };
 
     // initialize xlib context
@@ -99,6 +106,14 @@ fn main() {
 
     xc.run(|xc, event| {
         update_suggestions(&xc, &trc, &mut state, screen_width, &apps);
+        if state.progress_finished == None {
+            let progress_lock = progress.lock().unwrap();
+            state.progress = progress_lock.0 as f32 / progress_lock.1 as f32;
+            drop(progress_lock);
+            if 1.0 - state.progress < 0.000_001 {
+                state.progress_finished = Some(Instant::now());
+            }
+        }
         render_bar(&xc, &trc, &gc, screen_width, &state, &args, font_height);
         match event {
             None => Action::Run,
@@ -120,12 +135,39 @@ fn render_bar(
     // clear
     xc.draw_rect(&gc, args.color0, 0, 0, width, args.height);
 
+    // render the scanning progress bar
+    if match state.progress_finished {
+        Some(t) => t.elapsed().as_secs_f32() < 0.5,
+        None => true,
+    } {
+        let progress_bar_width = ((width as f32 * 0.3).floor() * state.progress) as u32;
+        let mut progress_bar_color = args.color4;
+        if let Some(t) = state.progress_finished {
+            let intensity = (0.5 - t.elapsed().as_secs_f32()).max(0.0) * 2.0;
+            let r = (((args.color0 >> 16) as u8) as f32 * (1.0 - intensity) + 255_f32 * intensity)
+                .round() as u64;
+            let g = (((args.color0 >> 8) as u8) as f32 * (1.0 - intensity) + 255_f32 * intensity)
+                .round() as u64;
+            let b = (((args.color0) as u8) as f32 * (1.0 - intensity) + 255_f32 * intensity).round()
+                as u64;
+            progress_bar_color = (r << 16) + (g << 8) + b;
+        }
+        xc.draw_rect(
+            &gc,
+            progress_bar_color,
+            0,
+            0,
+            progress_bar_width,
+            args.height,
+        );
+    }
+
     // render the typed text
     xc.render_text(&trc, 0, 0, text_y, &state.text);
     // and the caret
     xc.draw_rect(
         &gc,
-        args.color2,
+        0xFFFFFF,
         xc.get_text_dimensions(&trc, &state.text[0..state.caret_pos as usize])
             .0 as i32,
         2,

@@ -1,7 +1,7 @@
 
 # rlaunch ![Rust](https://github.com/PonasKovas/rlaunch/workflows/Rust/badge.svg?branch=actions) ![GitHub](https://img.shields.io/github/license/PonasKovas/rlaunch)
 
-rlaunch is a fast and light-weight application launcher for X11 written in Rust that I made because `dmenu` was too slow for me. I'm glad to say that indeed rlaunch works a lot faster than `dmenu` (at least for me, I haven't tested it on other computers).
+rlaunch is a fast, light-weight and modern application launcher for X11 written in Rust that I made because `dmenu` was too slow for me. I'm glad to say that indeed rlaunch works a lot faster than `dmenu` (at least for me, I haven't tested it on other computers).
 
 ![demo](https://i.imgur.com/z4H2Duh.gif)
 
@@ -12,7 +12,7 @@ This should work on all linux distributions and DEs that use X11, but if it does
 ### Usage
 
 ```
-rlaunch 1.3.4
+rlaunch 1.3.5
 A simple and light-weight tool for launching applications and running commands on X11.
 
 USAGE:
@@ -29,6 +29,7 @@ OPTIONS:
         --color1 <color1>        The color of the selected suggestion background [default: #1286a1]
         --color2 <color2>        The color of the text [default: #ffffff]
         --color3 <color3>        The color of the suggestions text [default: #ffffff]
+        --color4 <color4>        The color of the file scanning progress bar [default: #242222]
     -f, --font <font>            The font used on the bar [default: DejaVu Sans Mono]
     -h, --height <height>        The height of the bar (in pixels) [default: 22]
     -t, --terminal <terminal>    The terminal to use when launching applications that require a terminal [default: i3-

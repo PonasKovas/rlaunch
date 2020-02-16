@@ -3,7 +3,7 @@ use structopt::StructOpt;
 #[derive(Debug, StructOpt, Clone)]
 #[structopt(
     name = "rlaunch",
-    about = "A simple and light-weight tool for launching applications and running commands on X11."
+    about = "A simple, light-weight and modern tool for launching applications and running commands on X11."
 )]
 pub struct Args {
     /// The color of the bar background
@@ -21,6 +21,10 @@ pub struct Args {
     /// The color of the suggestions text
     #[structopt(long, default_value = "#ffffff", parse(try_from_str = parse_color))]
     pub color3: u64,
+
+    /// The color of the file scanning progress bar
+    #[structopt(long, default_value = "#242222", parse(try_from_str = parse_color))]
+    pub color4: u64,
 
     /// The height of the bar (in pixels)
     #[structopt(short, long, default_value = "22")]
