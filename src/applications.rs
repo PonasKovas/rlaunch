@@ -119,12 +119,6 @@ fn do_read_applications(
         });
     }
 
-    // make sure progress is 100%
-    let mut progress_lock = progress.lock().unwrap();
-    progress_lock.0 = 1;
-    progress_lock.1 = 1;
-    drop(progress_lock);
-
     // sort the apps alphabetically
     apps.lock().unwrap().sort_unstable();
 }
