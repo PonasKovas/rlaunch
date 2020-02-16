@@ -3,7 +3,7 @@
 
 rlaunch is a fast, light-weight and modern application launcher for X11 written in Rust that I made because `dmenu` was too slow for me. I'm glad to say that indeed rlaunch works a lot faster than `dmenu` (at least for me, I haven't tested it on other computers).
 
-![demo](https://i.imgur.com/z4H2Duh.gif)
+![demo](https://i.imgur.com/oHPjqTM.gif)
 
 ## Getting Started
 
