@@ -16,6 +16,8 @@ use x11_dl::xlib;
 const KEY_ESCAPE: u32 = 9;
 const KEY_LEFT: u32 = 113;
 const KEY_RIGHT: u32 = 114;
+const KEY_UP: u32 = 111;
+const KEY_DOWN: u32 = 116;
 const KEY_BACKSPACE: u32 = 22;
 const KEY_ENTER: u32 = 36;
 const KEY_TAB: u32 = 23;
@@ -236,6 +238,12 @@ fn handle_event(
                 } else {
                     state.selected -= 1;
                 }
+            }
+            KEY_UP => {
+                state.selected = max(0, state.selected as i16 - 1) as u8;
+            }
+            KEY_DOWN => {
+                state.selected = min(state.selected + 1, state.suggestions.len() as u8 - 1);
             }
             KEY_RIGHT => {
                 if state.caret_pos == state.text.len() as i32 {
