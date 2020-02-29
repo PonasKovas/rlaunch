@@ -4,6 +4,7 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 pub type Apps = Vec<App>;
+type DirID = String;
 
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct App {
@@ -12,42 +13,166 @@ pub struct App {
     pub show_terminal: bool,
 }
 
-fn do_read_applications(
-    apps: &Mutex<Apps>,
-    dirs: &[&str],
-    nondesktop: bool,
-    progress: &Mutex<(u32, u32)>,
-) {
-    // get a vector of all files so we can track progress easily
-    let mut files = Vec::new();
-    for dir in dirs {
-        let files_iterator = match read_dir(dir) {
-            Ok(iterator) => iterator,
-            Err(e) => {
-                eprintln!("Couldn't read the files in {} ({})", dir, e);
+pub fn read_applications(apps: &Mutex<Apps>, scan_path: bool, progress: &Mutex<(u32, u32)>) {
+    let xdg_data_home = match var("XDG_DATA_HOME") {
+        Ok(h) => (h + "/applications", "".to_owned()),
+        Err(_) => match var("HOME") {
+            Ok(s) => (s + "/.local/share/applications", "".to_owned()),
+            Err(_) => {
+                eprintln!("$HOME not set!");
+                ("".to_owned(), "".to_owned())
+            }
+        },
+    };
+    let mut xdg_data_dirs = match var("XDG_DATA_DIRS") {
+        Ok(d) => d
+            .split(':')
+            .map(|s| (s.to_owned() + "/applications", "".to_owned()))
+            .collect(),
+        Err(_) => "/usr/local/share/:/usr/share/"
+            .split(':')
+            .map(|s| (s.to_owned() + "/applications", "".to_owned()))
+            .collect(),
+    };
+
+    // all dirs that might have `applications` dir inside that we need to scan
+    let mut share_dirs = vec![xdg_data_home];
+    share_dirs.append(&mut xdg_data_dirs);
+
+    // count the files for the progress bar
+    let mut files_to_scan = 0;
+    let mut i = 0;
+    let mut len = share_dirs.len();
+    while i < len {
+        let files = match read_dir(&share_dirs[i].0) {
+            Ok(f) => f,
+            Err(_) => {
+                share_dirs.remove(i);
+                len -= 1;
                 continue;
             }
         };
-        files.append(&mut files_iterator.collect());
+        for file in files {
+            match file {
+                Ok(f) => {
+                    if f.path().is_dir() {
+                        share_dirs.insert(
+                            i + 1,
+                            match f.path().to_str() {
+                                Some(s) => (
+                                    s.to_owned(),
+                                    share_dirs[i].1.to_owned()
+                                        + "/"
+                                        + f.file_name().to_str().unwrap(),
+                                ),
+                                None => continue,
+                            },
+                        );
+                    } else {
+                        files_to_scan += 1;
+                    }
+                }
+                Err(_) => continue,
+            }
+        }
+        i += 1;
+        len = share_dirs.len();
     }
 
-    progress.lock().unwrap().1 = files.len() as u32;
+    // and files in $PATH too, if -p flag set
+    if scan_path {
+        if let Ok(path) = var("PATH") {
+            for dir in path.split(':') {
+                let files = match read_dir(dir) {
+                    Ok(f) => f,
+                    Err(_) => {
+                        continue;
+                    }
+                };
+                for file in files {
+                    match file {
+                        Ok(f) => {
+                            if f.path().is_dir() {
+                                continue;
+                            } else {
+                                files_to_scan += 1;
+                            }
+                        }
+                        Err(_) => continue,
+                    }
+                }
+            }
+        }
+    }
 
-    'files: for file in files {
-        // update progress
-        progress.lock().unwrap().0 += 1;
+    // get the progress bar ready
+    progress.lock().unwrap().1 = files_to_scan;
 
-        let file = match file {
-            Ok(f) => f,
-            Err(_) => continue,
-        };
+    let now = Instant::now();
 
-        let path = file.path();
-        let (name, exec, terminal) = if path
-            .extension()
-            .map(|extension| extension == "desktop")
-            .unwrap_or(false)
-        {
+    // start actually scanning files
+    scan_desktop_entries(apps, share_dirs, progress);
+
+    if scan_path {
+        scan_path_dirs(apps, progress);
+    }
+
+    // sort the apps alphabetically
+    apps.lock().unwrap().sort_unstable();
+
+    println!(
+        "Finished reading all {} applications ({}s)",
+        files_to_scan,
+        now.elapsed().as_secs_f64()
+    );
+}
+
+fn scan_desktop_entries(
+    apps: &Mutex<Apps>,
+    dirs: Vec<(String, DirID)>,
+    progress: &Mutex<(u32, u32)>,
+) {
+    let mut scanned_ids = Vec::new();
+    for dir in dirs {
+        println!("scanning {:?}", dir);
+        'files: for file in read_dir(dir.0).unwrap() {
+            let file = file.unwrap();
+
+            if file.path().is_dir() {
+                continue;
+            }
+
+            // update progress
+            progress.lock().unwrap().0 += 1;
+
+            let path = file.path();
+
+            // if file doesn't end in .desktop, move on
+            if !path
+                .extension()
+                .map(|ext| ext == "desktop")
+                .unwrap_or(false)
+            {
+                continue;
+            }
+
+            // get the freedesktop.org file ID
+            let mut file_id = String::new();
+            if !dir.1.is_empty() {
+                file_id += &dir.1[1..].replace('/', "-");
+                file_id += "-";
+            }
+            if let Some(stem) = path.file_stem() {
+                file_id += &stem.to_string_lossy();
+            };
+
+            // if there were any other files with the same ID before, ignore this file
+            if scanned_ids.contains(&file_id) {
+                continue;
+            }
+            scanned_ids.push(file_id);
+
+            // cool. now we can start parsing the file
             let contents = match read_to_string(path) {
                 Ok(contents) => contents,
                 Err(_) => continue,
@@ -59,16 +184,24 @@ fn do_read_applications(
             let mut terminal = String::new();
             for line in contents.lines() {
                 if line.starts_with("Hidden=") {
-                    let mut hidden = line[7..].to_string();
-                    // remove quotes if present
-                    if hidden.len() > 1 && hidden.starts_with('"') && hidden.ends_with('"') {
-                        hidden = hidden[1..hidden.len() - 1].to_string();
-                    }
-                    match hidden.trim().to_lowercase().parse() {
-                        Err(_) | Ok(true) => { // hidden or couldnt parse
+                    let mut value = line[7..].to_string();
+                    remove_quotes(&mut value);
+                    match value.trim().to_lowercase().parse() {
+                        Err(_) | Ok(true) => {
+                            // hidden or couldnt parse
                             continue 'files;
-                        },
-                        _ => {},
+                        }
+                        _ => {}
+                    }
+                } else if line.starts_with("NoDisplay=") {
+                    let mut value = line[10..].to_string();
+                    remove_quotes(&mut value);
+                    match value.trim().to_lowercase().parse() {
+                        Err(_) | Ok(true) => {
+                            // nodisplay or couldnt parse
+                            continue 'files;
+                        }
+                        _ => {}
                     }
                 } else if exec == "" && line.starts_with("Exec=") {
                     exec = line[5..].to_string();
@@ -76,17 +209,11 @@ fn do_read_applications(
                     while let Some(i) = exec.find('%') {
                         exec.replace_range(i..(i + 2), "");
                     }
-                    // remove quotes if present
-                    if exec.len() > 1 && exec.starts_with('"') && exec.ends_with('"') {
-                        exec = exec[1..exec.len() - 1].to_string();
-                    }
+                    remove_quotes(&mut exec);
                     exec = exec.trim().to_owned();
                 } else if name == "" && line.starts_with("Name=") {
                     name = line[5..].to_string();
-                    // remove quotes if present
-                    if name.len() > 1 && name.starts_with('"') && name.ends_with('"') {
-                        name = name[1..name.len() - 1].to_string();
-                    }
+                    remove_quotes(&mut name);
                 } else if app_type == "" && line.starts_with("Type=") {
                     app_type = line[5..].to_string();
                 } else if terminal == "" && line.starts_with("Terminal=") {
@@ -106,54 +233,61 @@ fn do_read_applications(
             terminal.make_ascii_lowercase();
             let terminal = !(terminal == "" || terminal == "false");
 
-            (name, exec, terminal)
-        } else {
-            if !nondesktop {
-                continue;
-            }
-
-            let name = match path
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-            {
-                Some(name) => name,
-                None => continue,
-            };
-            let exec = path.to_string_lossy().into_owned();
-
-            (name, exec, false)
-        };
-
-        apps.lock().unwrap().push(App {
-            name,
-            exec,
-            show_terminal: terminal,
-        });
+            apps.lock().unwrap().push(App {
+                name,
+                exec,
+                show_terminal: terminal,
+            });
+        }
     }
-
-    // sort the apps alphabetically
-    apps.lock().unwrap().sort_unstable();
 }
 
-pub fn read_applications(apps: &Mutex<Apps>, scan_path: bool, progress: &Mutex<(u32, u32)>) {
-    let dirs: &[&str] = &[
-        "/usr/share/applications",
-        "/usr/local/share/applications",
-        &format!("{}/.local/share/applications", var("HOME").unwrap()),
-    ];
+fn scan_path_dirs(apps: &Mutex<Apps>, progress: &Mutex<(u32, u32)>) {
+    if let Ok(path) = var("PATH") {
+        for dir in path.split(':') {
+            let files = match read_dir(dir) {
+                Ok(f) => f,
+                Err(_) => {
+                    continue;
+                }
+            };
+            for file in files {
+                let file = match file {
+                    Ok(f) => {
+                        if f.path().is_dir() {
+                            continue;
+                        }
+                        f
+                    }
+                    Err(_) => continue,
+                };
 
-    let now = Instant::now();
+                // update progress
+                progress.lock().unwrap().0 += 1;
 
-    if scan_path {
-        let path_dirs = var("PATH").unwrap();
-        let all_dirs: Vec<&str> = dirs.iter().copied().chain(path_dirs.split(':')).collect();
-        do_read_applications(apps, &all_dirs, true, progress);
-    } else {
-        do_read_applications(apps, dirs, false, progress);
+                let path = file.path();
+                let name = match path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                {
+                    Some(name) => name,
+                    None => continue,
+                };
+                let exec = path.to_string_lossy().into_owned();
+
+                apps.lock().unwrap().push(App {
+                    name,
+                    exec,
+                    show_terminal: false,
+                });
+            }
+        }
     }
+}
 
-    println!(
-        "Finished reading all applications ({}s)",
-        now.elapsed().as_secs_f64()
-    );
+fn remove_quotes(string: &mut String) {
+    // remove quotes if present
+    if string.len() > 1 && string.starts_with('"') && string.ends_with('"') {
+        *string = string[1..string.len() - 1].to_string();
+    }
 }
