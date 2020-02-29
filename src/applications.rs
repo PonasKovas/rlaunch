@@ -33,7 +33,7 @@ fn do_read_applications(
 
     progress.lock().unwrap().1 = files.len() as u32;
 
-    for file in files {
+    'files: for file in files {
         // update progress
         progress.lock().unwrap().0 += 1;
 
@@ -58,7 +58,19 @@ fn do_read_applications(
             let mut app_type = String::new();
             let mut terminal = String::new();
             for line in contents.lines() {
-                if exec == "" && line.starts_with("Exec=") {
+                if line.starts_with("Hidden=") {
+                    let mut hidden = line[7..].to_string();
+                    // remove quotes if present
+                    if hidden.len() > 1 && hidden.starts_with('"') && hidden.ends_with('"') {
+                        hidden = hidden[1..hidden.len() - 1].to_string();
+                    }
+                    match hidden.trim().to_lowercase().parse() {
+                        Err(_) | Ok(true) => { // hidden or couldnt parse
+                            continue 'files;
+                        },
+                        _ => {},
+                    }
+                } else if exec == "" && line.starts_with("Exec=") {
                     exec = line[5..].to_string();
                     // remove any arguments
                     while let Some(i) = exec.find('%') {
