@@ -2,13 +2,13 @@ use std::env::var;
 use std::fs::{read_dir, read_to_string};
 use std::sync::Mutex;
 use std::time::Instant;
+use std::collections::BTreeMap;
 
-pub type Apps = Vec<App>;
+pub type Apps = BTreeMap<String, App>;
 type DirID = String;
 
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct App {
-    pub name: String,
     pub exec: String,
     pub show_terminal: bool,
 }
@@ -116,9 +116,6 @@ pub fn read_applications(apps: &Mutex<Apps>, scan_path: bool, progress: &Mutex<(
     if scan_path {
         scan_path_dirs(apps, progress);
     }
-
-    // sort the apps alphabetically
-    apps.lock().unwrap().sort_unstable();
 
     println!(
         "Finished reading all {} applications ({}s)",
@@ -233,8 +230,7 @@ fn scan_desktop_entries(
             terminal.make_ascii_lowercase();
             let terminal = !(terminal == "" || terminal == "false");
 
-            apps.lock().unwrap().push(App {
-                name,
+            apps.lock().unwrap().insert(name, App {
                 exec,
                 show_terminal: terminal,
             });
@@ -275,8 +271,7 @@ fn scan_path_dirs(apps: &Mutex<Apps>, progress: &Mutex<(u32, u32)>) {
                 };
                 let exec = path.to_string_lossy().into_owned();
 
-                apps.lock().unwrap().push(App {
-                    name,
+                apps.lock().unwrap().insert(name, App {
                     exec,
                     show_terminal: false,
                 });

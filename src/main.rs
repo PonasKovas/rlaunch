@@ -25,7 +25,7 @@ const KEY_TAB: u32 = 23;
 struct State {
     caret_pos: i32,
     text: String,
-    suggestions: Vec<(String, usize)>,
+    suggestions: Vec<String>,
     selected: u8,
     progress: f32,
     progress_finished: Option<Instant>,
@@ -185,14 +185,13 @@ fn render_bar(
     // render suggestions
     let mut x = (width as f32 * 0.3).floor() as i32;
     for (i, suggestion) in state.suggestions.iter().enumerate() {
-        let name = &suggestion.0;
-        let name_width = xc.get_text_dimensions(&trc, &name).0 as i32;
+        let name_width = xc.get_text_dimensions(&trc, &suggestion).0 as i32;
         // if selected, render rectangle below
         if state.selected as usize == i {
             xc.draw_rect(&gc, args.color1, x, 0, name_width as u32 + 16, args.height);
         }
 
-        xc.render_text(&trc, 1, x + 8, text_y, name);
+        xc.render_text(&trc, 1, x + 8, text_y, suggestion);
 
         x += name_width + 16;
     }
@@ -211,13 +210,13 @@ fn update_suggestions(
     let mut x = 0;
     let max_width = (width as f32 * 0.7).floor() as i32;
     let apps_lock = apps.lock().unwrap();
-    for i in 0..(*apps_lock).len() {
-        let name = &apps_lock[i].name;
+    for app in apps_lock.iter() {
+        let name = &app.0;
         if name.to_lowercase().contains(&state.text.to_lowercase()) {
             let width = xc.get_text_dimensions(&trc, &name).0 as i32;
             if x + width <= max_width {
                 x += width;
-                state.suggestions.push((apps_lock[i].name.clone(), i));
+                state.suggestions.push(name.to_string());
             } else {
                 break;
             }
@@ -269,7 +268,8 @@ fn handle_event(
                 if state.suggestions.is_empty() {
                     run_command(&state.text);
                 } else {
-                    let app = &apps.lock().unwrap()[state.suggestions[state.selected as usize].1];
+                    let apps_lock = apps.lock().unwrap();
+                    let app = &apps_lock.get(&state.suggestions[state.selected as usize]).unwrap();
                     if app.show_terminal {
                         run_command(&format!("{} -e \"{}\"", terminal, app.exec));
                     } else {
@@ -280,7 +280,7 @@ fn handle_event(
             }
             KEY_TAB => {
                 if !state.suggestions.is_empty() {
-                    state.text = state.suggestions[state.selected as usize].0.to_string();
+                    state.text = state.suggestions[state.selected as usize].to_string();
                     state.caret_pos = state.text.len() as i32;
                     state.selected = 0;
                 }
