@@ -215,7 +215,7 @@ fn update_suggestions(
         if name.to_lowercase().contains(&state.text.to_lowercase()) {
             let width = xc.get_text_dimensions(&trc, &name).0 as i32;
             if x + width <= max_width {
-                x += width;
+                x += width + 16;
                 state.suggestions.push(name.to_string());
             } else {
                 break;
