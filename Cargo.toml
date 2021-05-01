@@ -7,3 +7,4 @@ edition = "2018"
 [dependencies]
 x11-dl = "2.18.5"
 structopt = "0.3.9"
+sublime_fuzzy = "0.7"

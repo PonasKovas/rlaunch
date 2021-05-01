@@ -25,6 +25,7 @@ const KEY_TAB: u32 = 23;
 struct State {
     caret_pos: i32,
     text: String,
+    last_text: String,
     suggestions: Vec<String>,
     selected: u8,
     progress: f32,
@@ -44,6 +45,7 @@ fn main() {
     let mut state = State {
         caret_pos: 0,
         text: String::new(),
+        last_text: String::new(),
         suggestions: Vec::new(),
         selected: 0,
         progress: 0.0,
@@ -204,24 +206,37 @@ fn update_suggestions(
     width: u32,
     apps: &Mutex<applications::Apps>,
 ) {
+    if state.text == state.last_text {
+        return;
+    }
     state.suggestions.clear();
     // iterate over application names
     // and find those that contain the typed text
     let mut x = 0;
     let max_width = (width as f32 * 0.7).floor() as i32;
     let apps_lock = apps.lock().unwrap();
+    let mut suggestions = Vec::new();
     for app in apps_lock.iter() {
         let name = &app.0;
-        if name.to_lowercase().contains(&state.text.to_lowercase()) {
-            let width = xc.get_text_dimensions(&trc, &name).0 as i32;
-            if x + width <= max_width {
-                x += width + 16;
-                state.suggestions.push(name.to_string());
-            } else {
-                break;
-            }
+        if let Some(mtch) = sublime_fuzzy::best_match(&state.text, name) {
+            suggestions.push((mtch, name.to_string()));
         }
     }
+    // sort the suggestion by match scores
+    suggestions.sort_unstable();
+    suggestions.reverse();
+
+    for suggestion in &suggestions {
+        let name = &suggestion.1;
+        let width = xc.get_text_dimensions(&trc, &name).0 as i32;
+        if x + width <= max_width {
+            x += width + 16;
+            state.suggestions.push(name.to_string());
+        } else {
+            break;
+        }
+    }
+    state.last_text = state.text.clone();
 }
 
 fn handle_event(
@@ -269,7 +284,9 @@ fn handle_event(
                     run_command(&state.text);
                 } else {
                     let apps_lock = apps.lock().unwrap();
-                    let app = &apps_lock.get(&state.suggestions[state.selected as usize]).unwrap();
+                    let app = &apps_lock
+                        .get(&state.suggestions[state.selected as usize])
+                        .unwrap();
                     if app.show_terminal {
                         run_command(&format!("{} -e \"{}\"", terminal, app.exec));
                     } else {
