@@ -21,6 +21,8 @@ const KEY_DOWN: u32 = 116;
 const KEY_BACKSPACE: u32 = 22;
 const KEY_ENTER: u32 = 36;
 const KEY_TAB: u32 = 23;
+const KEY_K: u32 = 45;
+const KEY_U: u32 = 30;
 
 struct State {
     caret_pos: i32,
@@ -247,6 +249,7 @@ fn handle_event(
     terminal: &str,
 ) -> Action {
     if let Some(e) = xc.xevent_to_xkeyevent(*event) {
+        let ctrl = (e.state & xlib::ControlMask) != 0;
         match e.keycode {
             KEY_ESCAPE => {
                 return Action::Stop;
@@ -277,6 +280,14 @@ fn handle_event(
                     state.caret_pos -= 1;
                     state.selected = 0;
                 }
+            }
+            KEY_U if ctrl => {
+                state.text = state.text.split_off(state.caret_pos as usize);
+                state.caret_pos = 0;
+            }
+            KEY_K if ctrl => {
+                state.text.truncate(state.caret_pos as usize);
+                state.selected = 0;
             }
             KEY_ENTER => {
                 // if no suggestions available, just run the text, otherwise launch selected application
