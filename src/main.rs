@@ -220,7 +220,9 @@ fn update_suggestions(
     let mut suggestions = Vec::new();
     for app in apps_lock.iter() {
         let name = &app.0;
-        if let Some(mtch) = sublime_fuzzy::best_match(&state.text, name) {
+        if let Some(mtch) =
+            sublime_fuzzy::best_match(&state.text.to_lowercase(), &name.to_lowercase())
+        {
             suggestions.push((mtch, name.to_string()));
         }
     }
