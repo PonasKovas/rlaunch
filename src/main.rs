@@ -4,6 +4,8 @@ mod x11;
 
 use applications::{read_applications, Apps};
 use arguments::{get_args, Args};
+use fuzzy_matcher::skim::SkimMatcherV2;
+use fuzzy_matcher::FuzzyMatcher;
 use std::cmp::{max, min};
 use std::process::exit;
 use std::process::Command;
@@ -28,7 +30,7 @@ struct State {
     caret_pos: i32,
     text: String,
     last_text: String,
-    suggestions: Vec<String>,
+    suggestions: Vec<(i64, String)>,
     selected: u8,
     progress: f32,
     progress_finished: Option<Instant>,
@@ -189,13 +191,13 @@ fn render_bar(
     // render suggestions
     let mut x = (width as f32 * 0.3).floor() as i32;
     for (i, suggestion) in state.suggestions.iter().enumerate() {
-        let name_width = xc.get_text_dimensions(&trc, &suggestion).0 as i32;
+        let name_width = xc.get_text_dimensions(&trc, &suggestion.1).0 as i32;
         // if selected, render rectangle below
         if state.selected as usize == i {
             xc.draw_rect(&gc, args.color1, x, 0, name_width as u32 + 16, args.height);
         }
 
-        xc.render_text(&trc, 1, x + 8, text_y, suggestion);
+        xc.render_text(&trc, 1, x + 8, text_y, &suggestion.1);
 
         x += name_width + 16;
     }
@@ -213,30 +215,29 @@ fn update_suggestions(
     }
     state.suggestions.clear();
     // iterate over application names
-    // and find those that contain the typed text
+    // and find those that match the typed text
     let mut x = 0;
     let max_width = (width as f32 * 0.7).floor() as i32;
     let apps_lock = apps.lock().unwrap();
-    let mut suggestions = Vec::new();
     for app in apps_lock.iter() {
         let name = &app.0;
-        if let Some(mtch) =
-            sublime_fuzzy::best_match(&state.text.to_lowercase(), &name.to_lowercase())
+        if let Some(mtch) = SkimMatcherV2::default()
+            .fuzzy_match(name, &state.text.split_whitespace().collect::<String>())
         {
-            suggestions.push((mtch, name.to_string()));
+            state.suggestions.push((mtch, name.to_string()));
         }
     }
     // sort the suggestion by match scores
-    suggestions.sort_unstable();
-    suggestions.reverse();
+    state.suggestions.sort_unstable();
+    state.suggestions.reverse();
 
-    for suggestion in &suggestions {
+    for (i, suggestion) in state.suggestions.iter().enumerate() {
         let name = &suggestion.1;
         let width = xc.get_text_dimensions(&trc, &name).0 as i32;
         if x + width <= max_width {
             x += width + 16;
-            state.suggestions.push(name.to_string());
         } else {
+            state.suggestions.truncate(i + 1);
             break;
         }
     }
@@ -298,7 +299,7 @@ fn handle_event(
                 } else {
                     let apps_lock = apps.lock().unwrap();
                     let app = &apps_lock
-                        .get(&state.suggestions[state.selected as usize])
+                        .get(&state.suggestions[state.selected as usize].1)
                         .unwrap();
                     if app.show_terminal {
                         run_command(&format!("{} -e \"{}\"", terminal, app.exec));
@@ -310,7 +311,7 @@ fn handle_event(
             }
             KEY_TAB => {
                 if !state.suggestions.is_empty() {
-                    state.text = state.suggestions[state.selected as usize].to_string();
+                    state.text = state.suggestions[state.selected as usize].1.to_string();
                     state.caret_pos = state.text.len() as i32;
                     state.selected = 0;
                 }
