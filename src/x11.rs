@@ -1,5 +1,6 @@
 use std::ffi::CString;
 use std::mem::MaybeUninit;
+use std::os::raw::c_char;
 use std::ptr::{null, null_mut};
 use std::thread::sleep;
 use std::time::Duration;
@@ -306,7 +307,7 @@ impl X11Context {
     }
     pub fn keyevent_to_char(&self, mut keyevent: xlib::XKeyEvent) -> char {
         unsafe {
-            let mut c_char: i8 = 0;
+            let mut c_char: c_char = 0;
             (self.xlib.XLookupString)(&mut keyevent, &mut c_char, 1, null_mut(), null_mut());
             c_char as u8 as char
         }
