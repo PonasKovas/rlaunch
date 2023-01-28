@@ -5,6 +5,7 @@ use std::ptr::{null, null_mut};
 use std::thread::sleep;
 use std::time::Duration;
 use x11_dl::{xft, xinerama, xlib};
+use std::ffi::c_ulong;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Action {
@@ -17,12 +18,12 @@ pub struct X11Context {
     xin: xinerama::Xlib,
     xft: xft::Xft,
     display: *mut xlib::_XDisplay,
-    root: u64,
+    root: c_ulong,
 }
 
 pub struct TextRenderingContext {
     visual: *mut xlib::Visual,
-    cmap: u64,
+    cmap: c_ulong,
     font: *mut xft::XftFont,
     colors: Vec<xft::XftColor>,
     draw: *mut xft::XftDraw,
@@ -30,11 +31,11 @@ pub struct TextRenderingContext {
 
 pub struct GraphicsContext {
     gc: *mut xlib::_XGC,
-    window: u64,
+    window: c_ulong,
 }
 
 pub struct Window {
-    window: u64,
+    window: c_ulong,
 }
 
 pub struct Screens {
@@ -248,7 +249,7 @@ impl X11Context {
         height: u32,
     ) {
         unsafe {
-            (self.xlib.XSetForeground)(self.display, gc.gc, color);
+            (self.xlib.XSetForeground)(self.display, gc.gc, color as c_ulong);
             (self.xlib.XFillRectangle)(self.display, gc.window, gc.gc, x, y, width, height);
         }
     }
