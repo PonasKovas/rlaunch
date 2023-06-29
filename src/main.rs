@@ -227,9 +227,8 @@ fn update_suggestions(
             state.suggestions.push((mtch, name.to_string()));
         }
     }
-    // sort the suggestion by match scores
-    state.suggestions.sort_unstable();
-    state.suggestions.reverse();
+    // sort the suggestion by match scores (descending) and name (ascending)
+    state.suggestions.sort_unstable_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
 
     for (i, suggestion) in state.suggestions.iter().enumerate() {
         let name = &suggestion.1;
